@@ -179,3 +179,15 @@ class CurrentUserView(APIView):
         user = request.user
         user_data = UserSerializer(user).data
         return JsonResponse(user_data, status=status.HTTP_200_OK)
+
+
+class RefreshTokenIssueView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        tokens = get_tokens_for_user(request.user)
+        return JsonResponse({
+            'message': 'New refresh token issued.',
+            'access': tokens['access'],
+            'refresh': tokens['refresh'],
+        }, status=status.HTTP_200_OK)

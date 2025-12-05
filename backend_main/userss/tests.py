@@ -15,6 +15,7 @@ from .views import (
     EditProfileView,
     RemoveAccountView,
     CurrentUserView,
+    RefreshTokenIssueView,
 )
 
 
@@ -220,3 +221,28 @@ class AuthenticatedUserViewTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = json.loads(response.content)
         self.assertEqual(data.get("email"), "authuser@example.com")
+
+
+class RefreshTokenIssueViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = CustomUser.objects.create_user(
+            username="refreshuser",
+            email="refreshuser@example.com",
+            password="strongpassword",
+        )
+
+    def test_authenticated_user_receives_new_refresh_token(self):
+        url = reverse("users:refresh-token")
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(url, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertIn("refresh", data)
+        self.assertIn("access", data)
+        self.assertEqual(data.get("message"), "New refresh token issued.")
+
+    def test_unauthenticated_request_is_rejected(self):
+        url = reverse("users:refresh-token")
+        response = self.client.post(url, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

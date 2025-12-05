@@ -1,9 +1,9 @@
-import io
 import hashlib
 import tempfile
 import os
 
-from django.test import TestCase, override_settings
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase
 from django.urls import reverse
 from django.core.cache import cache
 
@@ -141,6 +141,26 @@ class UploadViewTests(TestCase):
         self.assertEqual(response2.status_code, status.HTTP_200_OK)
         self.assertEqual(response2.data["image_hash"], expected_hash)
         self.assertEqual(Upload.objects.filter(image_hash=expected_hash).count(), 1)
+
+    def test_upload_create_accepts_binary_file(self):
+        UploadListCreateView.throttle_classes = []
+        image_bytes = b"binary-image"
+        uploaded_file = SimpleUploadedFile("binary.png", image_bytes, content_type="image/png")
+        request = self.factory.post(
+            "/api/v1/core/uploads/",
+            {"image_file": uploaded_file},
+            format="multipart",
+        )
+        force_authenticate(request, user=self.user)
+        response = UploadListCreateView.as_view()(request)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        expected_hash = hashlib.sha256(image_bytes).hexdigest()
+        self.assertTrue(Upload.objects.filter(image_hash=expected_hash).exists())
+        upload = Upload.objects.get(image_hash=expected_hash)
+        self.assertTrue(os.path.exists(upload.image_path))
+        with open(upload.image_path, "rb") as stored_file:
+            self.assertEqual(stored_file.read(), image_bytes)
+        os.remove(upload.image_path)
 
     def test_upload_retrieve_and_update(self):
         # Make the file real; content for hashing

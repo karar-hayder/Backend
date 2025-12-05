@@ -61,6 +61,16 @@ Refresh your access token.
 
 ---
 
+### POST `/refresh/token/` (Authenticated)
+
+Issue a brand-new refresh/access token pair for the currently authenticated user (useful if you lose the original refresh token).
+
+**Response:**
+- `200 OK`
+- Returns `{ "refresh": "...", "access": "..." }`.
+
+---
+
 ### POST `/logout/` (Authenticated)
 
 Log out current user.
@@ -123,7 +133,8 @@ List all uploads (may be filtered by user or by project logic).
 Upload a new image file by path.
 
 **Request:**
-- `image_path` (string, required): local path to the image file on the server.
+- `image_path` (string, required if `image_file` not provided): local path to the image file on the server.
+- `image_file` (binary, optional): raw uploaded image file. The API will persist it server-side and inject the resulting `image_path` and `image_hash`.
 - Optionally: `token` for API token authentication.
   
 **Response:**  
@@ -178,4 +189,3 @@ Update a specific upload object.
 - For authentication, use JWT tokens obtained at signup or login.
 
 ---
-

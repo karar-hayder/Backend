@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import timedelta
 from pathlib import Path
+from tempfile import gettempdir
 
 from mongoengine import connect
 
@@ -10,6 +11,12 @@ if not os.environ.get("SECRET_KEY", False):
     load_dotenv(".env.local")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+UPLOAD_STORAGE_DIR = os.environ.get("UPLOAD_STORAGE_DIR", os.path.join(BASE_DIR, "uploads_storage"))
+try:
+    os.makedirs(UPLOAD_STORAGE_DIR, exist_ok=True)
+except OSError:
+    UPLOAD_STORAGE_DIR = gettempdir()
 
 SECRET_KEY = os.environ.get("SECRET_KEY", None)
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "t")
