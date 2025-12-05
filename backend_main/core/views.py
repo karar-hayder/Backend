@@ -1,9 +1,11 @@
 import hashlib
+import mimetypes
 import os
 import uuid
 
 from django.conf import settings
 from django.db.models import Q
+from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import generics, status
@@ -19,6 +21,22 @@ from .cache import (
     clear_upload_cache,
 )
 
+
+def _safe_calculate_file_hash(image_path):
+    """Return a SHA256 hash for the given image path, or None if unavailable."""
+    if not image_path:
+        return None
+    try:
+        hasher = hashlib.sha256()
+        with open(image_path, "rb") as image_file:
+            for chunk in iter(lambda: image_file.read(1024 * 1024), b""):
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except Exception:
+        return None
+
 class UploadListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     throttle_classes = [DemoUserUploadRateThrottle, IPRateThrottle, APITokenRateThrottle]
@@ -32,7 +50,7 @@ class UploadListCreateView(generics.ListCreateAPIView):
         return self._apply_filters(base_qs)
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        serializer.save(owner=self.request.user, image_path=self.request.data.get("image_path"))
 
     def _get_query_params(self):
         if hasattr(self.request, "query_params"):
@@ -98,18 +116,6 @@ class UploadListCreateView(generics.ListCreateAPIView):
             request.data._mutable = True
         request.data[key] = value
 
-    def _calculate_hash_from_path(self, image_path):
-        try:
-            hasher = hashlib.sha256()
-            with open(image_path, "rb") as image_file:
-                for chunk in iter(lambda: image_file.read(1024 * 1024), b""):
-                    if not chunk:
-                        break
-                    hasher.update(chunk)
-            return hasher.hexdigest()
-        except Exception:
-            raise ValidationError({"image_path": "Unable to read image file from image_path."})
-
     def _persist_uploaded_file(self, uploaded_file):
         storage_dir = getattr(settings, "UPLOAD_STORAGE_DIR", None)
         if not storage_dir:
@@ -131,6 +137,35 @@ class UploadListCreateView(generics.ListCreateAPIView):
         except Exception:
             self._cleanup_file(destination_path)
             raise ValidationError({"image_file": "Unable to store uploaded file."})
+        return destination_path, hasher.hexdigest()
+
+    def _persist_existing_file(self, source_path):
+        if not source_path:
+            raise ValidationError({"image_file": "Provide an image file to upload."})
+        if not os.path.isfile(source_path):
+            raise ValidationError({"image_path": "Provided image_path does not exist on the server."})
+        storage_dir = getattr(settings, "UPLOAD_STORAGE_DIR", None)
+        if not storage_dir:
+            raise ValidationError({"image_file": "File storage location is not configured."})
+        try:
+            os.makedirs(storage_dir, exist_ok=True)
+        except Exception:
+            raise ValidationError({"image_file": "Unable to store uploaded file."})
+
+        extension = os.path.splitext(source_path)[1] or ".img"
+        filename = f"{uuid.uuid4()}{extension}"
+        destination_path = os.path.join(storage_dir, filename)
+        hasher = hashlib.sha256()
+        try:
+            with open(source_path, "rb") as source, open(destination_path, "wb") as destination:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    if not chunk:
+                        break
+                    destination.write(chunk)
+                    hasher.update(chunk)
+        except Exception:
+            self._cleanup_file(destination_path)
+            raise ValidationError({"image_path": "Unable to store uploaded file."})
         return destination_path, hasher.hexdigest()
 
     def _cleanup_file(self, file_path):
@@ -164,10 +199,12 @@ class UploadListCreateView(generics.ListCreateAPIView):
             self._set_request_value(request, "image_path", image_path)
             new_file_created = True
         else:
-            image_path = request.data.get("image_path")
-            if not image_path:
-                raise ValidationError({"image_path": "This field is required when image_file is not provided."})
-            image_hash = self._calculate_hash_from_path(image_path)
+            provided_path = request.data.get("image_path")
+            if not provided_path:
+                raise ValidationError({"image_file": "Upload an image_file or provide a valid server path."})
+            image_path, image_hash = self._persist_existing_file(provided_path)
+            self._set_request_value(request, "image_path", image_path)
+            new_file_created = True
 
         self._set_request_value(request, "image_hash", image_hash)
 
@@ -232,46 +269,39 @@ class UploadRetrieveUpdateView(generics.RetrieveUpdateAPIView):
 
     def retrieve(self, request, *args, **kwargs):
         upload_id = kwargs.get(self.lookup_field)
-        cached_payload = None
+        owner_id = str(request.user.id)
         if upload_id:
             cached_payload = get_cached_upload_payload(upload_id)
             if cached_payload is not None and self._owns_cached_payload(request, cached_payload):
                 return Response(cached_payload, status=status.HTTP_200_OK)
-        if not cached_payload and upload_id:
-            try:
-                upload_obj = self.get_queryset().get(id=upload_id)
-                with open(upload_obj.image_path, "rb") as image_file:
-                    file_content = image_file.read()
-                    image_hash = hashlib.sha256(file_content).hexdigest()
-                cached_payload = get_cached_upload_payload(
-                    upload_id=None,
-                    image_hash=image_hash,
-                    owner_id=str(upload_obj.owner_id) if upload_obj.owner_id else None,
-                )
-                if cached_payload is not None:
-                    return Response(cached_payload, status=status.HTTP_200_OK)
-            except Upload.DoesNotExist:
+
+        try:
+            instance = self.get_object()
+        except Http404:
+            if upload_id:
                 cached_payload = get_cached_upload_payload(upload_id)
                 if cached_payload is not None and self._owns_cached_payload(request, cached_payload):
                     return Response(cached_payload, status=status.HTTP_200_OK)
-            except Exception:
-                # Could be file missing, etc, just skip to next step
-                pass
-        response = super().retrieve(request, *args, **kwargs)
-        # After retrieve, calculate image_hash from file and cache it
-        try:
-            image_path = response.data.get("image_path")
-            owner_id = str(request.user.id)
-            if image_path:
-                with open(image_path, "rb") as image_file:
-                    file_content = image_file.read()
-                    image_hash_to_cache = hashlib.sha256(file_content).hexdigest()
-                cache_upload_payload(upload_id, response.data, image_hash=image_hash_to_cache, owner_id=owner_id)
+            raise
+
+        image_hash = _safe_calculate_file_hash(instance.image_path)
+        if image_hash:
+            cached_payload = get_cached_upload_payload(
+                upload_id=None,
+                image_hash=image_hash,
+                owner_id=owner_id,
+            )
+            if cached_payload is not None:
+                return Response(cached_payload, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(instance)
+        response_data = serializer.data
+        if upload_id:
+            if image_hash:
+                cache_upload_payload(upload_id, response_data, image_hash=image_hash, owner_id=owner_id)
             else:
-                cache_upload_payload(upload_id, response.data)
-        except Exception:
-            cache_upload_payload(upload_id, response.data)
-        return response
+                cache_upload_payload(upload_id, response_data)
+        return Response(response_data, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
         response = super().update(request, *args, **kwargs)
@@ -280,16 +310,36 @@ class UploadRetrieveUpdateView(generics.RetrieveUpdateAPIView):
         clear_upload_cache(upload_id)
         # After update, recalculate image hash and cache
         owner_id = str(request.user.id)
-        try:
-            image_path = response.data.get("image_path")
-            if image_path:
-                with open(image_path, "rb") as image_file:
-                    file_content = image_file.read()
-                    image_hash = hashlib.sha256(file_content).hexdigest()
-                clear_upload_cache(image_hash=image_hash, owner_id=owner_id)
-                cache_upload_payload(upload_id, response.data, image_hash=image_hash, owner_id=owner_id)
-            else:
-                cache_upload_payload(upload_id, response.data)
-        except Exception:
+        image_hash = None
+        if upload_id:
+            try:
+                upload_obj = self.get_queryset().get(id=upload_id)
+                image_hash = _safe_calculate_file_hash(upload_obj.image_path)
+            except Upload.DoesNotExist:
+                image_hash = None
+
+        if image_hash:
+            clear_upload_cache(image_hash=image_hash, owner_id=owner_id)
+            cache_upload_payload(upload_id, response.data, image_hash=image_hash, owner_id=owner_id)
+        else:
             cache_upload_payload(upload_id, response.data)
+        return response
+
+
+class UploadImageView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'id'
+
+    def get_queryset(self):
+        return Upload.objects.filter(owner=self.request.user)
+
+    def get(self, request, *args, **kwargs):
+        upload = self.get_object()
+        image_path = upload.image_path
+        if not image_path or not os.path.isfile(image_path):
+            return Response({"detail": "Image file not found."}, status=status.HTTP_404_NOT_FOUND)
+        content_type, _ = mimetypes.guess_type(image_path)
+        response = FileResponse(open(image_path, "rb"), content_type=content_type or "application/octet-stream")
+        response["Content-Length"] = os.path.getsize(image_path)
+        response["Content-Disposition"] = f'inline; filename="{os.path.basename(image_path)}"'
         return response

@@ -14,7 +14,7 @@ from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from .models import Upload
 from .serializers import UploadSerializer
-from .views import UploadListCreateView, UploadRetrieveUpdateView
+from .views import UploadListCreateView, UploadRetrieveUpdateView, UploadImageView
 from .rates import DemoUserUploadRateThrottle, IPRateThrottle
 from userss.models import CustomUser
 
@@ -66,7 +66,7 @@ class UploadSerializerTests(TestCase):
         for field in [
             "id",
             "owner",
-            "image_path",
+            "image_url",
             "image_hash",
             "raw_text",
             "processed_text",
@@ -75,6 +75,7 @@ class UploadSerializerTests(TestCase):
         ]:
             self.assertIn(field, data)
         self.assertEqual(str(owner.id), data["owner"])
+        self.assertEqual(reverse("upload-image", kwargs={"id": upload.id}), data["image_url"])
         os.remove(image_path)
 
 
@@ -303,7 +304,7 @@ class UploadViewTests(TestCase):
         # Update (also check it refreshes cache)
         request_put = self.factory.put(
             f"/api/v1/core/uploads/{upload.id}/",
-            {"image_path": self.image_path4, "image_hash": expected_hash, "processed_text": "processed"},
+            {"image_hash": expected_hash, "processed_text": "processed"},
             format="json",
         )
         force_authenticate(request_put, user=self.user)
@@ -352,6 +353,21 @@ class UploadViewTests(TestCase):
         # Second retrieve: should fail, using cache (cashe should not have deleted things)
         resp2 = UploadRetrieveUpdateView.as_view()(request, id=upload.id)
         self.assertEqual(resp2.status_code, 404)
+
+    def test_upload_image_endpoint_returns_stream(self):
+        with open(self.image_path2, "wb") as f:
+            f.write(b"img2-bytes")
+        upload = Upload.objects.create(
+            owner=self.user,
+            image_path=self.image_path2,
+            image_hash=hashlib.sha256(b"img2-bytes").hexdigest(),
+        )
+        request = self.factory.get(f"/api/v1/core/uploads/{upload.id}/image/")
+        force_authenticate(request, user=self.user)
+        response = UploadImageView.as_view()(request, id=upload.id)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = b"".join(response.streaming_content)
+        self.assertEqual(body, b"img2-bytes")
 
 
 class DemoUserUploadRateThrottleTests(TestCase):
