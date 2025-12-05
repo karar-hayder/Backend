@@ -2,7 +2,7 @@ from django.http import JsonResponse
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, TokenError
 
 from django.contrib.auth import logout, authenticate
 from django.core.exceptions import ValidationError
@@ -105,6 +105,26 @@ class LoginView(APIView):
                 {'message': 'Invalid email or password.'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
+
+
+class RefreshView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        """
+        Accepts a refresh token, returns a new access token.
+        """
+        refresh_token = request.data.get('refresh')
+        if not refresh_token:
+            return JsonResponse({'errors': {'refresh': 'Refresh token required.'}}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            refresh = RefreshToken(refresh_token)
+            access_token = str(refresh.access_token)
+            return JsonResponse({
+                'access': access_token
+            }, status=status.HTTP_200_OK)
+        except TokenError:
+            return JsonResponse({'errors': {'refresh': 'Invalid or expired refresh token.'}}, status=status.HTTP_401_UNAUTHORIZED)
 
 
 class LogoutView(APIView):
