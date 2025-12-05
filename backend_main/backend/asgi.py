@@ -22,7 +22,7 @@ application = ProtocolTypeRouter({
     "http": django_asgi_app,
     "websocket": AuthMiddlewareStack(
         URLRouter([
-            path("ws/uploads/<uuid:upload_id>/", UploadStatusConsumer.as_asgi()),
+            path("ws/core/", UploadStatusConsumer.as_asgi()),
         ])
     ),
 })
