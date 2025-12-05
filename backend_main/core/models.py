@@ -16,9 +16,21 @@ class Upload(models.Model):
         (STATUS_ERROR, "Error"),
     ]
 
-    id = models.UUIDField(
-        primary_key=True, default=uuid.uuid4, editable=False, db_index=True
-    )
+    OUTPUT_FORMAT_RAW = "raw"
+    OUTPUT_FORMAT_PARAGRAPH = "paragraph"
+    OUTPUT_FORMAT_CHOICES = [
+        (OUTPUT_FORMAT_RAW, "Raw Text"),
+        (OUTPUT_FORMAT_PARAGRAPH, "Structured Paragraphs"),
+    ]
+
+    OCR_MODE_FAST = "fast"
+    OCR_MODE_ACCURATE = "high_accuracy"
+    OCR_MODE_CHOICES = [
+        (OCR_MODE_FAST, "Fast"),
+        (OCR_MODE_ACCURATE, "High Accuracy"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_index=True)
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -31,6 +43,28 @@ class Upload(models.Model):
     image_hash = models.CharField(max_length=128, db_index=True)
     raw_text = models.TextField(blank=True, null=True)
     processed_text = models.TextField(blank=True, null=True)
+    auto_language_detection = models.BooleanField(
+        default=True,
+        help_text="Whether OCR should auto-detect the document language.",
+    )
+    language_hint = models.CharField(
+        max_length=32,
+        blank=True,
+        null=True,
+        help_text="Optional ISO language code when auto detection is disabled.",
+    )
+    output_format = models.CharField(
+        max_length=32,
+        choices=OUTPUT_FORMAT_CHOICES,
+        default=OUTPUT_FORMAT_RAW,
+        help_text="Controls whether OCR returns raw text or paragraph-structured output.",
+    )
+    ocr_mode = models.CharField(
+        max_length=32,
+        choices=OCR_MODE_CHOICES,
+        default=OCR_MODE_FAST,
+        help_text="Fast is lower latency; High Accuracy spends more time for better quality.",
+    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
