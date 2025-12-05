@@ -1,7 +1,7 @@
 """
 ASGI config for backend project.
 
-This sets up ASGI application and integrates Django Channels for websocket support.
+This sets up the ASGI application and integrates Django Channels for websocket support.
 """
 
 import os
@@ -9,20 +9,31 @@ import os
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 
 from django.core.asgi import get_asgi_application
+
 django_asgi_app = get_asgi_application()
 
-from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
+from channels.routing import ProtocolTypeRouter, URLRouter
 from django.urls import path
 
-# Import *after* Django settings/configuration is ensured
+# Import the UploadStatusConsumer from core.consumers
 from core.consumers import UploadStatusConsumer
 
-application = ProtocolTypeRouter({
-    "http": django_asgi_app,
-    "websocket": AuthMiddlewareStack(
-        URLRouter([
-            path("ws/core/", UploadStatusConsumer.as_asgi()),
-        ])
-    ),
-})
+application = ProtocolTypeRouter(
+    {
+        "http": django_asgi_app,
+        "websocket": AuthMiddlewareStack(
+            URLRouter(
+                [
+                    # Pattern: /ws/core/upload/<uuid:instance_id>/
+                    path(
+                        "ws/core/upload/<uuid:instance_id>/",
+                        UploadStatusConsumer.as_asgi(),
+                    ),
+                    # Pattern: /ws/core/upload/ for upload-wide ("all") updates
+                    path("ws/core/upload/", UploadStatusConsumer.as_asgi()),
+                ]
+            )
+        ),
+    }
+)

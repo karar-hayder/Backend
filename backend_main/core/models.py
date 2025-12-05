@@ -1,20 +1,24 @@
-from django.db import models
-from django.conf import settings
 import uuid
 
+from django.conf import settings
+from django.db import models
+
+
 class Upload(models.Model):
-    STATUS_UPLOADED = 'uploaded'
-    STATUS_PROCESSING = 'processing'
-    STATUS_PROCESSED = 'processed'
-    STATUS_ERROR = 'error'
+    STATUS_UPLOADED = "uploaded"
+    STATUS_PROCESSING = "processing"
+    STATUS_PROCESSED = "processed"
+    STATUS_ERROR = "error"
     STATUS_CHOICES = [
-        (STATUS_UPLOADED, 'Uploaded'),
-        (STATUS_PROCESSING, 'Processing'),
-        (STATUS_PROCESSED, 'Processed'),
-        (STATUS_ERROR, 'Error'),
+        (STATUS_UPLOADED, "Uploaded"),
+        (STATUS_PROCESSING, "Processing"),
+        (STATUS_PROCESSED, "Processed"),
+        (STATUS_ERROR, "Error"),
     ]
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_index=True)
+    id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False, db_index=True
+    )
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -39,10 +43,10 @@ class Upload(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=['id']),
-            models.Index(fields=['image_hash']),
-            models.Index(fields=['owner']),
+            models.Index(fields=["id"]),
+            models.Index(fields=["image_hash"]),
+            models.Index(fields=["owner"]),
         ]
 
     def __str__(self):
-        return f"Upload {self.id} - {self.image_hash[:10]}"
+        return f"Upload {self.id} - {str(self.image_hash)[:10]}"

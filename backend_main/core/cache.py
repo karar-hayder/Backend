@@ -7,6 +7,7 @@ UPLOAD_DATA_CACHE_TIMEOUT = getattr(settings, "UPLOAD_DATA_CACHE_TIMEOUT", 60 * 
 def get_upload_cache_key(upload_id):
     return f"upload-data:{upload_id}"
 
+
 def get_upload_hash_cache_key(image_hash, owner_id=None):
     owner_part = owner_id or "global"
     return f"upload-data-hash:{owner_part}:{image_hash}"
@@ -18,7 +19,11 @@ def cache_upload_payload(upload_id, payload, image_hash=None, owner_id=None):
     """
     cache.set(get_upload_cache_key(upload_id), payload, UPLOAD_DATA_CACHE_TIMEOUT)
     if image_hash:
-        cache.set(get_upload_hash_cache_key(image_hash, owner_id), payload, UPLOAD_DATA_CACHE_TIMEOUT)
+        cache.set(
+            get_upload_hash_cache_key(image_hash, owner_id),
+            payload,
+            UPLOAD_DATA_CACHE_TIMEOUT,
+        )
 
 
 def get_cached_upload_payload(upload_id=None, image_hash=None, owner_id=None):

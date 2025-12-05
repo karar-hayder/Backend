@@ -1,0 +1,70 @@
+# Users API tests
+
+### Register a new user
+POST http://localhost:8000/api/v1/users/signup/
+Content-Type: application/json
+
+{
+  "email": "alice@example.com",
+  "password": "strongpassword123",
+  "first_name": "Alice",
+  "last_name": "Test"
+}
+
+###
+
+### Login with existing user
+POST http://localhost:8000/api/v1/users/login/
+Content-Type: application/json
+
+{
+  "email": "alice@example.com",
+  "password": "strongpassword123"
+}
+
+###
+
+### Get current user (requires Authorization header)
+GET http://localhost:8000/api/v1/users/user/
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY0OTg1ODI0LCJpYXQiOjE3NjQ5NzE0MjQsImp0aSI6ImRmMGI3YzFjMzBmYjQxM2M4MmI3NGQyYzFhNWE3MWUzIiwidXNlcl9pZCI6ImQwZWE2ZWNmLWVkOTItNDlkMy04ZDU4LTY5OTMxMzE5MmQ4MyJ9.rvg10hqRcbEVHjF33_ppcF5EHy0GmmNL4uDuiM4Ki2s
+
+###
+
+### Refresh access token using refresh token
+POST http://localhost:8000/api/v1/users/refresh/
+Content-Type: application/json
+
+{
+  "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTc2NTU3NjIyNCwiaWF0IjoxNzY0OTcxNDI0LCJqdGkiOiI4OTc2ZjA5OTIyMjI0OWQ2YTBiMzEzMDVjNzAxM2NhNiIsInVzZXJfaWQiOiJkMGVhNmVjZi1lZDkyLTQ5ZDMtOGQ1OC02OTkzMTMxOTJkODMifQ.hORMEdccXYqEgja7HzKg5D6Wkx226w7Tcw0Vs13rcKk"
+}
+
+###
+
+### Refresh token (issue new refresh + access token, must be authenticated)
+POST http://localhost:8000/api/v1/users/refresh/token/
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY0OTg1ODI0LCJpYXQiOjE3NjQ5NzE0MjQsImp0aSI6ImRmMGI3YzFjMzBmYjQxM2M4MmI3NGQyYzFhNWE3MWUzIiwidXNlcl9pZCI6ImQwZWE2ZWNmLWVkOTItNDlkMy04ZDU4LTY5OTMxMzE5MmQ4MyJ9.rvg10hqRcbEVHjF33_ppcF5EHy0GmmNL4uDuiM4Ki2s
+
+###
+
+### Edit profile (change first and/or last name)
+PUT http://localhost:8000/api/v1/users/profile/edit/
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY0OTg1ODI0LCJpYXQiOjE3NjQ5NzE0MjQsImp0aSI6ImRmMGI3YzFjMzBmYjQxM2M4MmI3NGQyYzFhNWE3MWUzIiwidXNlcl9pZCI6ImQwZWE2ZWNmLWVkOTItNDlkMy04ZDU4LTY5OTMxMzE5MmQ4MyJ9.rvg10hqRcbEVHjF33_ppcF5EHy0GmmNL4uDuiM4Ki2s
+
+{
+  "first_name": "Alicia",
+  "last_name": "Tester"
+}
+
+###
+
+### Logout
+POST http://localhost:8000/api/v1/users/logout/
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY0OTg1ODI0LCJpYXQiOjE3NjQ5NzE0MjQsImp0aSI6ImRmMGI3YzFjMzBmYjQxM2M4MmI3NGQyYzFhNWE3MWUzIiwidXNlcl9pZCI6ImQwZWE2ZWNmLWVkOTItNDlkMy04ZDU4LTY5OTMxMzE5MmQ4MyJ9.rvg10hqRcbEVHjF33_ppcF5EHy0GmmNL4uDuiM4Ki2s
+
+###
+
+### Delete account
+DELETE http://localhost:8000/api/v1/users/profile/delete/
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY0OTg1ODI0LCJpYXQiOjE3NjQ5NzE0MjQsImp0aSI6ImRmMGI3YzFjMzBmYjQxM2M4MmI3NGQyYzFhNWE3MWUzIiwidXNlcl9pZCI6ImQwZWE2ZWNmLWVkOTItNDlkMy04ZDU4LTY5OTMxMzE5MmQ4MyJ9.rvg10hqRcbEVHjF33_ppcF5EHy0GmmNL4uDuiM4Ki2s
+

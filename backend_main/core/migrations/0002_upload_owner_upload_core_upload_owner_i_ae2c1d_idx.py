@@ -8,18 +8,24 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0001_initial'),
+        ("core", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='upload',
-            name='owner',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='core_uploads', to=settings.AUTH_USER_MODEL),
+            model_name="upload",
+            name="owner",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="core_uploads",
+                to=settings.AUTH_USER_MODEL,
+            ),
         ),
         migrations.AddIndex(
-            model_name='upload',
-            index=models.Index(fields=['owner'], name='core_upload_owner_i_ae2c1d_idx'),
+            model_name="upload",
+            index=models.Index(fields=["owner"], name="core_upload_owner_i_ae2c1d_idx"),
         ),
     ]

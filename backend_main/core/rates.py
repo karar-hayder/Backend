@@ -1,9 +1,12 @@
-from django.utils import timezone
-from django.conf import settings
-from rest_framework.throttling import BaseThrottle
-from userss.models import CustomUser, APIToken
-from core.models import Upload
 from datetime import timedelta
+
+from django.conf import settings
+from django.utils import timezone
+from rest_framework.throttling import BaseThrottle
+
+from core.models import Upload
+from userss.models import APIToken, CustomUser
+
 
 class DemoUserUploadRateThrottle(BaseThrottle):
     """
@@ -15,10 +18,16 @@ class DemoUserUploadRateThrottle(BaseThrottle):
 
     def allow_request(self, request, view):
         user = getattr(request, "user", None)
-        if user and user.is_authenticated and hasattr(user, "role") and user.role == CustomUser.ROLE_DEMO_USER:
+        if (
+            user
+            and user.is_authenticated
+            and hasattr(user, "role")
+            and user.role == CustomUser.ROLE_DEMO_USER
+        ):
             uploads_count = Upload.objects.filter(owner=user).count()
             return uploads_count < self.rate
         return True
+
 
 class IPRateThrottle(BaseThrottle):
     """
@@ -29,15 +38,16 @@ class IPRateThrottle(BaseThrottle):
     duration = timedelta(hours=1)
 
     def get_ident(self, request):
-        xff = request.META.get('HTTP_X_FORWARDED_FOR')
+        xff = request.META.get("HTTP_X_FORWARDED_FOR")
         if xff:
-            ip = xff.split(',')[0]
+            ip = xff.split(",")[0]
         else:
-            ip = request.META.get('REMOTE_ADDR')
+            ip = request.META.get("REMOTE_ADDR")
         return ip
 
     def allow_request(self, request, view):
         from django.core.cache import cache
+
         ident = self.get_ident(request)
         cache_key = f"ip-upload-rate:{ident}"
         request_history = cache.get(cache_key, [])
@@ -47,8 +57,11 @@ class IPRateThrottle(BaseThrottle):
         if len(request_history) >= self.rate:
             return False
         request_history.append(now)
-        cache.set(cache_key, request_history, timeout=int(self.duration.total_seconds()))
+        cache.set(
+            cache_key, request_history, timeout=int(self.duration.total_seconds())
+        )
         return True
+
 
 class APITokenRateThrottle(BaseThrottle):
     """
@@ -82,6 +95,7 @@ class APITokenRateThrottle(BaseThrottle):
 
     def allow_request(self, request, view):
         from django.core.cache import cache
+
         token_val = self.get_token(request)
         if not token_val:
             # No token, pass (this throttle is for tokened uploads)
@@ -99,5 +113,7 @@ class APITokenRateThrottle(BaseThrottle):
         if len(request_history) >= self.rate:
             return False
         request_history.append(now)
-        cache.set(cache_key, request_history, timeout=int(self.duration.total_seconds()))
+        cache.set(
+            cache_key, request_history, timeout=int(self.duration.total_seconds())
+        )
         return True

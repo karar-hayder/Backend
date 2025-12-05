@@ -1,33 +1,36 @@
 import hashlib
-import tempfile
 import os
+import tempfile
 from datetime import timedelta
 
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
-from django.core.cache import cache
 from django.utils import timezone
-
 from rest_framework import status
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
-from .models import Upload
-from .serializers import UploadSerializer
-from .views import UploadListCreateView, UploadRetrieveUpdateView
-from .rates import DemoUserUploadRateThrottle, IPRateThrottle
 from userss.models import CustomUser
 
-def create_temp_image_file(content=b'dummy image data'):
+from .models import Upload
+from .rates import DemoUserUploadRateThrottle, IPRateThrottle
+from .serializers import UploadSerializer
+from .views import UploadListCreateView, UploadRetrieveUpdateView
+
+
+def create_temp_image_file(content=b"dummy image data"):
     # Helper to create an actual file on disk
-    fd, path = tempfile.mkstemp(suffix='.png')
-    with os.fdopen(fd, 'wb') as tmp:
+    fd, path = tempfile.mkstemp(suffix=".png")
+    with os.fdopen(fd, "wb") as tmp:
         tmp.write(content)
     return path
+
 
 def calc_sha256(path):
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
+
 
 class UploadModelTests(TestCase):
     def test_str_representation_includes_id_and_hash_prefix(self):
@@ -92,13 +95,18 @@ class UploadViewTests(TestCase):
             email="other@example.com",
             password="strongpassword",
         )
-        self.image_path1 = create_temp_image_file(b'img1')
-        self.image_path2 = create_temp_image_file(b'img2')
-        self.image_path3 = create_temp_image_file(b'img3')
-        self.image_path4 = create_temp_image_file(b'img4')
+        self.image_path1 = create_temp_image_file(b"img1")
+        self.image_path2 = create_temp_image_file(b"img2")
+        self.image_path3 = create_temp_image_file(b"img3")
+        self.image_path4 = create_temp_image_file(b"img4")
 
     def tearDown(self):
-        for p in [self.image_path1, self.image_path2, self.image_path3, self.image_path4]:
+        for p in [
+            self.image_path1,
+            self.image_path2,
+            self.image_path3,
+            self.image_path4,
+        ]:
             try:
                 os.remove(p)
             except Exception:
@@ -120,7 +128,7 @@ class UploadViewTests(TestCase):
             image_path=self.image_path2,
             image_hash="hash2",
         )
-        other_path = create_temp_image_file(b'other')
+        other_path = create_temp_image_file(b"other")
         Upload.objects.create(
             owner=self.other_user,
             image_path=other_path,
@@ -137,12 +145,11 @@ class UploadViewTests(TestCase):
         # Should be ordered by -created_at (latest first).
         uploaded_ids = [item["id"] for item in response.data]
         actual_qs_order = list(
-            Upload.objects.filter(owner=self.user).order_by('-created_at').values_list("id", flat=True)
+            Upload.objects.filter(owner=self.user)
+            .order_by("-created_at")
+            .values_list("id", flat=True)
         )
-        self.assertListEqual(
-            uploaded_ids,
-            [str(uid) for uid in actual_qs_order]
-        )
+        self.assertListEqual(uploaded_ids, [str(uid) for uid in actual_qs_order])
 
     def test_upload_list_filters_by_status_and_hash(self):
         UploadListCreateView.throttle_classes = []
@@ -217,8 +224,8 @@ class UploadViewTests(TestCase):
         self.assertEqual(response.data[0]["id"], str(recent.id))
 
     def test_user_cannot_access_other_users_upload(self):
-        other_path = create_temp_image_file(b'other-access')
-        other_hash = hashlib.sha256(b'other-access').hexdigest()
+        other_path = create_temp_image_file(b"other-access")
+        other_hash = hashlib.sha256(b"other-access").hexdigest()
         foreign_upload = Upload.objects.create(
             owner=self.other_user,
             image_path=other_path,
@@ -259,12 +266,16 @@ class UploadViewTests(TestCase):
         response2 = UploadListCreateView.as_view()(request2)
         self.assertEqual(response2.status_code, status.HTTP_200_OK)
         self.assertEqual(response2.data["image_hash"], expected_hash)
-        self.assertEqual(Upload.objects.filter(image_hash=expected_hash, owner=self.user).count(), 1)
+        self.assertEqual(
+            Upload.objects.filter(image_hash=expected_hash, owner=self.user).count(), 1
+        )
 
     def test_upload_create_accepts_binary_file(self):
         UploadListCreateView.throttle_classes = []
         image_bytes = b"binary-image"
-        uploaded_file = SimpleUploadedFile("binary.png", image_bytes, content_type="image/png")
+        uploaded_file = SimpleUploadedFile(
+            "binary.png", image_bytes, content_type="image/png"
+        )
         request = self.factory.post(
             "/api/v1/core/uploads/",
             {"image_file": uploaded_file},
@@ -274,7 +285,9 @@ class UploadViewTests(TestCase):
         response = UploadListCreateView.as_view()(request)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         expected_hash = hashlib.sha256(image_bytes).hexdigest()
-        self.assertTrue(Upload.objects.filter(image_hash=expected_hash, owner=self.user).exists())
+        self.assertTrue(
+            Upload.objects.filter(image_hash=expected_hash, owner=self.user).exists()
+        )
         upload = Upload.objects.get(image_hash=expected_hash, owner=self.user)
         self.assertTrue(os.path.exists(upload.image_path))
         with open(upload.image_path, "rb") as stored_file:
@@ -303,7 +316,11 @@ class UploadViewTests(TestCase):
         # Update (also check it refreshes cache)
         request_put = self.factory.put(
             f"/api/v1/core/uploads/{upload.id}/",
-            {"image_path": self.image_path4, "image_hash": expected_hash, "processed_text": "processed"},
+            {
+                "image_path": self.image_path4,
+                "image_hash": expected_hash,
+                "processed_text": "processed",
+            },
             format="json",
         )
         force_authenticate(request_put, user=self.user)
@@ -314,6 +331,7 @@ class UploadViewTests(TestCase):
 
         # Now let's verify that cache is filled for both upload_id and image_hash
         from .cache import get_cached_upload_payload
+
         cache_by_id = get_cached_upload_payload(upload_id=str(upload.id))
         cache_by_hash = get_cached_upload_payload(
             upload_id=None,
@@ -379,7 +397,9 @@ class DemoUserUploadRateThrottleTests(TestCase):
             image_path=self.temp_image,
             image_hash="hashdemo",
         )
-        request = self.factory.post("/api/v1/core/uploads/", {"image_path": self.temp_image}, format="json")
+        request = self.factory.post(
+            "/api/v1/core/uploads/", {"image_path": self.temp_image}, format="json"
+        )
         force_authenticate(request, user=self.user)
         self.assertTrue(self.throttle.allow_request(request, view=None))
 

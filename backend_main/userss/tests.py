@@ -1,23 +1,22 @@
 import json
-from django.contrib.auth import get_user_model
-from django.urls import reverse
-from django.test import TestCase
 
+from django.contrib.auth import get_user_model
+from django.contrib.sessions.middleware import SessionMiddleware
+from django.test import TestCase
+from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
-from django.contrib.sessions.middleware import SessionMiddleware
 
-from .models import CustomUser, APIToken
+from .models import APIToken, CustomUser
 from .views import (
-    RegisterView,
+    CurrentUserView,
+    EditProfileView,
     LoginView,
     LogoutView,
-    EditProfileView,
-    RemoveAccountView,
-    CurrentUserView,
     RefreshTokenIssueView,
+    RegisterView,
+    RemoveAccountView,
 )
-
 
 User = get_user_model()
 

@@ -10,16 +10,17 @@ class UploadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Upload
         fields = [
-            'id',
-            'owner',
-            'image_path',
-            'image_hash',
-            'raw_text',
-            'processed_text',
-            'created_at',
-            'updated_at',
+            "id",
+            "owner",
+            "image_path",
+            "image_hash",
+            "raw_text",
+            "processed_text",
+            "status",
+            "created_at",
+            "updated_at",
         ]
-        read_only_fields = ['owner']
+        read_only_fields = ["owner"]
 
     def get_owner(self, instance):
         if instance.owner_id is None:

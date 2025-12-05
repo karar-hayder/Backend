@@ -4,15 +4,18 @@ from datetime import timedelta
 from pathlib import Path
 from tempfile import gettempdir
 
-from mongoengine import connect
+# from mongoengine import connect
 
 if not os.environ.get("SECRET_KEY", False):
     from dotenv import load_dotenv
+
     load_dotenv(".env.local")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-UPLOAD_STORAGE_DIR = os.environ.get("UPLOAD_STORAGE_DIR", os.path.join(BASE_DIR, "uploads_storage"))
+UPLOAD_STORAGE_DIR = os.environ.get(
+    "UPLOAD_STORAGE_DIR", os.path.join(BASE_DIR, "uploads_storage")
+)
 try:
     os.makedirs(UPLOAD_STORAGE_DIR, exist_ok=True)
 except OSError:
@@ -40,7 +43,7 @@ if _cors_origins_env:
         CORS_ALLOWED_ORIGINS.append(origin)
 
 
-AI_HOST = os.environ.get("AI_HOST", "http://localhost:5001")
+AI_HOST = os.environ.get("AI_HOST", "http://localhost:5000")
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = DEBUG or _cors_allow_all_env
@@ -75,6 +78,7 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_BEAT_SCHEDULE = {}
 
 INSTALLED_APPS = [
+    "corsheaders",
     # Django main apps
     "django.contrib.admin",
     "django.contrib.auth",
@@ -82,14 +86,11 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-
     # Third-party apps
-    "corsheaders",
     "rest_framework",
     "rest_framework.authtoken",
     "rest_framework_simplejwt",
     "channels",
-
     # My apps
     "userss.apps.UserssConfig",
     "core.apps.CoreConfig",
@@ -153,7 +154,7 @@ else:
 
 
 ## Use .env
-connect(db="hubits", host="mongodb://localhost:27017/hubits")
+# connect(db="hubits", host="mongodb://localhost:27017/hubits")
 
 AUTH_PASSWORD_VALIDATORS = [
     {
