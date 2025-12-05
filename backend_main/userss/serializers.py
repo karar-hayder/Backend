@@ -1,31 +1,18 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Profile
+from .models import CustomUser
 
 User = get_user_model()
 
-class ProfileSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Profile
-        fields = [
-            "id",
-            "first_name",
-            "last_name",
-            "user"
-        ]
-        read_only_fields = ["id", "user"]
-
 class UserSerializer(serializers.ModelSerializer):
-    profile = ProfileSerializer(read_only=True)
-
     class Meta:
-        model = User
+        model = CustomUser
         fields = [
             "id",
             "email",
-            "is_staff",
-            "is_active",
-            "date_joined",
-            "profile",
+            "role",
+            "last_ip",
+            "created_at",
+            "updated_at",
         ]
-        read_only_fields = ["id", "is_staff", "is_active", "date_joined", "profile"]
+        read_only_fields = ["id", "created_at", "updated_at"]

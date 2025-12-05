@@ -4,22 +4,16 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from django.contrib.auth import logout, authenticate, get_user_model
+from django.contrib.auth import logout, authenticate
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 
-from .serializers import UserSerializer, ProfileSerializer
-from .models import Profile
-
-User = get_user_model()
-
+from .serializers import UserSerializer
+from .models import CustomUser
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
-    return {
-        'refresh': str(refresh),
-        'access': str(refresh.access_token),
-    }
+    return {'refresh': str(refresh), 'access': str(refresh.access_token)}
 
 
 class RegisterView(APIView):
@@ -27,7 +21,7 @@ class RegisterView(APIView):
 
     def post(self, request):
         """
-        Handles user registration, including profile creation.
+        Handles user registration, using CustomUser only.
         """
         email = request.data.get('email', '').strip()
         password = request.data.get('password')
@@ -49,24 +43,23 @@ class RegisterView(APIView):
                 validate_email(email)
             except ValidationError:
                 errors['email'] = ['Enter a valid email address.']
-            email = User.objects.normalize_email(email)
-            if User.objects.filter(email__iexact=email).exists():
+            email = CustomUser.objects.normalize_email(email)
+            if CustomUser.objects.filter(email__iexact=email).exists():
                 errors['email'] = ['A user with this email already exists.']
 
         if errors:
             return JsonResponse({'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
 
         # User creation
-        user = User.objects.create_user(
+        user = CustomUser.objects.create_user(
             email=email,
             password=password,
         )
-
-        # Update first_name, last_name via Profile
-        profile, _ = Profile.objects.get_or_create(user=user)
-        profile.first_name = first_name
-        profile.last_name = last_name
-        profile.save()
+        if first_name:
+            user.first_name = first_name
+        if last_name:
+            user.last_name = last_name
+        user.save()
 
         tokens = get_tokens_for_user(user)
         user_data = UserSerializer(user).data
@@ -86,7 +79,7 @@ class LoginView(APIView):
         password = request.data.get('password')
 
         if email:
-            email = User.objects.normalize_email(email.strip())
+            email = CustomUser.objects.normalize_email(email.strip())
 
         if not email or not password:
             return JsonResponse(
@@ -135,19 +128,26 @@ class EditProfileView(APIView):
 
     def put(self, request):
         """
-        Allow updating first_name, last_name via the related Profile.
+        Allow updating first_name, last_name directly on CustomUser.
         """
         user = request.user
-        profile = getattr(user, "profile", None)
-        if not profile:
-            profile = Profile.objects.create(user=user)
+        first_name = request.data.get('first_name', '').strip()
+        last_name = request.data.get('last_name', '').strip()
+        updated = False
 
-        serializer = ProfileSerializer(profile, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
+        if first_name:
+            user.first_name = first_name
+            updated = True
+        if last_name:
+            user.last_name = last_name
+            updated = True
+
+        if updated:
+            user.save()
             user_data = UserSerializer(user).data
             return JsonResponse({'message': 'Profile updated successfully.', 'user': user_data}, status=status.HTTP_200_OK)
-        return JsonResponse({'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return JsonResponse({'errors': {'__all__': ['No updates provided.']}}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CurrentUserView(APIView):
