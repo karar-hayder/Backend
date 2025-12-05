@@ -120,7 +120,11 @@ Base: `/api/v1/core/`
 
 ### GET `/uploads/` (Authenticated)
 
-List all uploads (may be filtered by user or by project logic).
+List uploads created by the authenticated user. Optional query parameters:
+- `status`: filter by one or more statuses (repeat the parameter or comma-separate values, e.g. `status=processed,processing`).
+- `image_hash`: return only the upload that matches a specific hash.
+- `search`: case-insensitive substring match across `raw_text` and `processed_text`.
+- `created_after` / `created_before`: ISO 8601 timestamps for bounding the creation date range.
 
 **Response:**  
 - `200 OK`
@@ -130,7 +134,7 @@ List all uploads (may be filtered by user or by project logic).
 
 ### POST `/uploads/` (Authenticated)
 
-Upload a new image file by path.
+Upload a new image file by path. The created upload automatically belongs to the authenticated user; other users will never see it.
 
 **Request:**
 - `image_path` (string, required if `image_file` not provided): local path to the image file on the server.
@@ -171,6 +175,7 @@ Update a specific upload object.
 ```json
 {
   "id": "b63e167b-df1d-45b9-9b80-4cb8b71a045d",
+  "owner": "2c2c429f-bf17-4f8e-8da0-7cb7f5a698b0",
   "image_path": "/tmp/myimg.png",
   "image_hash": "7a4f14d...",
   "raw_text": "...",
@@ -187,5 +192,6 @@ Update a specific upload object.
 - Some rate limiting is enforced for uploads: per user (demo: max 5), per IP, and per API token.
 - Most endpoints require an `Authorization: Bearer <access_token>` header unless using an API token.
 - For authentication, use JWT tokens obtained at signup or login.
+- Uploads are scoped to the authenticated user; listing or retrieving by ID will only ever return your own files.
 
 ---
