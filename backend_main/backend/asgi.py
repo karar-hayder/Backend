@@ -1,16 +1,28 @@
 """
 ASGI config for backend project.
 
-It exposes the ASGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/5.1/howto/deployment/asgi/
+This sets up ASGI application and integrates Django Channels for websocket support.
 """
 
 import os
 
-from django.core.asgi import get_asgi_application
-
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 
-application = get_asgi_application()
+from django.core.asgi import get_asgi_application
+django_asgi_app = get_asgi_application()
+
+from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.auth import AuthMiddlewareStack
+from django.urls import path
+
+# Import *after* Django settings/configuration is ensured
+from core.consumers import UploadStatusConsumer
+
+application = ProtocolTypeRouter({
+    "http": django_asgi_app,
+    "websocket": AuthMiddlewareStack(
+        URLRouter([
+            path("ws/uploads/<uuid:upload_id>/", UploadStatusConsumer.as_asgi()),
+        ])
+    ),
+})
