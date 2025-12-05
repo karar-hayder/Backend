@@ -16,6 +16,10 @@ class UploadSerializer(serializers.ModelSerializer):
             'owner',
             'image_url',
             'image_hash',
+            'auto_language_detection',
+            'language_hint',
+            'output_format',
+            'ocr_mode',
             'raw_text',
             'processed_text',
             'created_at',
@@ -24,7 +28,8 @@ class UploadSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['owner', 'image_url']
         extra_kwargs = {
-            'image_path': {'write_only': True, 'required': False}
+            'image_path': {'write_only': True, 'required': False},
+            'language_hint': {'allow_blank': True, 'required': False},
         }
 
     def get_owner(self, instance):

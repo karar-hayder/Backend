@@ -68,6 +68,10 @@ class UploadSerializerTests(TestCase):
             "owner",
             "image_url",
             "image_hash",
+            "auto_language_detection",
+            "language_hint",
+            "output_format",
+            "ocr_mode",
             "raw_text",
             "processed_text",
             "created_at",
@@ -76,6 +80,10 @@ class UploadSerializerTests(TestCase):
             self.assertIn(field, data)
         self.assertEqual(str(owner.id), data["owner"])
         self.assertEqual(reverse("upload-image", kwargs={"id": upload.id}), data["image_url"])
+        self.assertTrue(data["auto_language_detection"])
+        self.assertEqual(upload.output_format, data["output_format"])
+        self.assertIn("image_path", serializer.fields)
+        self.assertTrue(serializer.fields["image_path"].write_only)
         os.remove(image_path)
 
 
@@ -281,6 +289,27 @@ class UploadViewTests(TestCase):
         with open(upload.image_path, "rb") as stored_file:
             self.assertEqual(stored_file.read(), image_bytes)
         os.remove(upload.image_path)
+
+    def test_upload_create_accepts_advanced_options(self):
+        UploadListCreateView.throttle_classes = []
+        with open(self.image_path2, "wb") as f:
+            f.write(b"adv-bytes")
+        payload = {
+            "image_path": self.image_path2,
+            "auto_language_detection": False,
+            "language_hint": "fr",
+            "output_format": Upload.OUTPUT_FORMAT_PARAGRAPH,
+            "ocr_mode": Upload.OCR_MODE_ACCURATE,
+        }
+        request = self.factory.post("/api/v1/core/uploads/", payload, format="json")
+        force_authenticate(request, user=self.user)
+        response = UploadListCreateView.as_view()(request)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        upload = Upload.objects.get(id=response.data["id"])
+        self.assertFalse(upload.auto_language_detection)
+        self.assertEqual("fr", upload.language_hint)
+        self.assertEqual(Upload.OUTPUT_FORMAT_PARAGRAPH, upload.output_format)
+        self.assertEqual(Upload.OCR_MODE_ACCURATE, upload.ocr_mode)
 
     def test_upload_retrieve_and_update(self):
         # Make the file real; content for hashing
