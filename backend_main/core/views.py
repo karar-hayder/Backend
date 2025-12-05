@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 import hashlib
-from .rates import DemoUserUploadRateThrottle, IPRateThrottle
+from .rates import DemoUserUploadRateThrottle, IPRateThrottle, APITokenRateThrottle
 from .models import Upload
 from .serializers import UploadSerializer
 from .cache import (
@@ -15,11 +15,22 @@ from .cache import (
 
 class UploadListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
-    throttle_classes = [DemoUserUploadRateThrottle, IPRateThrottle]
+    throttle_classes = [DemoUserUploadRateThrottle, IPRateThrottle, APITokenRateThrottle]
     queryset = Upload.objects.all().order_by('-created_at')
     serializer_class = UploadSerializer
 
     def create(self, request, *args, **kwargs):
+        # --- Custom: Check for token if present in URL/path or request ---
+        # The url pattern is .../uploads/<str:token> or .../uploads/
+        token = kwargs.get("token") or request.data.get("token")
+        if "token" in kwargs and not token:
+            raise ValidationError({"token": "Token is required in URL but was not provided."})
+        if token:
+            from userss.models import APIToken
+            try:
+                api_token = APIToken.objects.get(key=token, is_active=True)
+            except APIToken.DoesNotExist:
+                raise ValidationError({"token": "Provided API token is invalid or inactive."})
 
         image_path = request.data.get("image_path")
         if not image_path:

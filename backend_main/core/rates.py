@@ -16,13 +16,9 @@ class DemoUserUploadRateThrottle(BaseThrottle):
     def allow_request(self, request, view):
         user = getattr(request, "user", None)
         if user and user.is_authenticated and hasattr(user, "role") and user.role == CustomUser.ROLE_DEMO_USER:
-            uploads_count = Upload.objects.filter(
-                # optionally also restrict per day, but right now just restrict total
-                # 'user' relation if exists, otherwise by the uploader's id.
-                # This assumes Upload model is related to user, else needs extension
-                # If not implemented, fallback to count=0 always (not restricting anyone) or use last_ip.
-            ).count()
-            # If Upload does not have a user, use last_ip for demo user entries as a fallback.
+            # Limit is total uploads for all demo users
+            # Optionally: if Upload has a user field, can use user=... in filter
+            uploads_count = Upload.objects.count()
             return uploads_count < self.rate
         return True
 
@@ -34,7 +30,6 @@ class IPRateThrottle(BaseThrottle):
     rate = 20  # Max 20 uploads per hour per IP
     duration = timedelta(hours=1)
 
-    # This requires you to save IP rate counts somewhere - for a simple in-memory cache, use Django's cache.
     def get_ident(self, request):
         xff = request.META.get('HTTP_X_FORWARDED_FOR')
         if xff:
@@ -57,3 +52,54 @@ class IPRateThrottle(BaseThrottle):
         cache.set(cache_key, request_history, timeout=int(self.duration.total_seconds()))
         return True
 
+class APITokenRateThrottle(BaseThrottle):
+    """
+    Allow per-token rate limiting (API token).
+    E.g., no more than N uploads per hour per APIToken.
+    """
+
+    rate = 30  # Max 30 uploads per hour per token
+    duration = timedelta(hours=1)
+
+    def get_token(self, request):
+        """
+        Retrieves the API token string from the request.
+        Checks query param, POST data, or url kwargs.
+        """
+        # Token may be in the URL (kwargs), query params, or request.data
+        token = None
+        if hasattr(request, "parser_context"):
+            # parser_context is set on DRF views, has 'kwargs'
+            token = request.parser_context.get("kwargs", {}).get("token")
+        if not token:
+            token = request.query_params.get("token")
+        if not token and hasattr(request, "data"):
+            token = request.data.get("token")
+        # As a final fallback, if DRF didn't parse, check GET/POST direct
+        if not token:
+            token = request.GET.get("token")
+        if not token and hasattr(request, "POST"):
+            token = request.POST.get("token")
+        return token
+
+    def allow_request(self, request, view):
+        from django.core.cache import cache
+        token_val = self.get_token(request)
+        if not token_val:
+            # No token, pass (this throttle is for tokened uploads)
+            return True
+        # Only throttle if token exists and is valid in DB
+        try:
+            token_obj = APIToken.objects.get(key=token_val, is_active=True)
+        except APIToken.DoesNotExist:
+            return True  # Not an active API token, don't limit here
+        cache_key = f"token-upload-rate:{token_obj.key}"
+        request_history = cache.get(cache_key, [])
+        now = timezone.now()
+        # Remove expired
+        request_history = [dt for dt in request_history if now - dt < self.duration]
+        if len(request_history) >= self.rate:
+            return False
+        request_history.append(now)
+        cache.set(cache_key, request_history, timeout=int(self.duration.total_seconds()))
+        return True
