@@ -25,6 +25,9 @@ CORS_ALLOWED_ORIGINS = (
     else []
 )
 
+
+AI_HOST = os.environ.get("AI_HOST", "http://localhost:5001")
+
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOW_HEADERS = [
