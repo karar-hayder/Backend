@@ -76,7 +76,12 @@ class UploadViewTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 2)
         # Should be ordered by -created_at (latest first).
-        self.assertEqual(response.data[0]["id"], str(upload2.id))
+        uploaded_ids = [item["id"] for item in response.data]
+        actual_qs_order = list(Upload.objects.all().order_by('-created_at').values_list("id", flat=True))
+        self.assertListEqual(
+            uploaded_ids,
+            [str(uid) for uid in actual_qs_order]
+        )
 
     def test_upload_create_creates_new_upload(self):
         UploadListCreateView.throttle_classes = []
