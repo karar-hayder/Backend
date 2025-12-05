@@ -3,7 +3,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-# from mongoengine import connect
+from mongoengine import connect
 
 if not os.environ.get("SECRET_KEY", False):
     from dotenv import load_dotenv
@@ -74,6 +74,7 @@ INSTALLED_APPS = [
 
     # My apps
     "userss.apps.UserssConfig",
+    "core.apps.CoreConfig",
 ]
 
 MIDDLEWARE = [
@@ -134,7 +135,7 @@ else:
 
 
 ## Use .env
-# connect(db="hubits", host="mongodb://localhost:27017/hubits")
+connect(db="hubits", host="mongodb://localhost:27017/hubits")
 
 AUTH_PASSWORD_VALIDATORS = [
     {
