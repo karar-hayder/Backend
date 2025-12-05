@@ -50,8 +50,10 @@ class RegisterView(APIView):
         if errors:
             return JsonResponse({'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        # User creation
+        # User creation - use email for both username and email so that
+        # authentication with `username=email` works with the default manager.
         user = CustomUser.objects.create_user(
+            username=email,
             email=email,
             password=password,
         )

@@ -12,7 +12,5 @@ class UserSerializer(serializers.ModelSerializer):
             "email",
             "role",
             "last_ip",
-            "created_at",
-            "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id"]
