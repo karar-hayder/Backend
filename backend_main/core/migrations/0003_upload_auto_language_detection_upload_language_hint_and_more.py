@@ -6,28 +6,46 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0002_upload_owner_upload_core_upload_owner_i_ae2c1d_idx'),
+        ("core", "0002_upload_owner_upload_core_upload_owner_i_ae2c1d_idx"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='upload',
-            name='auto_language_detection',
-            field=models.BooleanField(default=True, help_text='Whether OCR should auto-detect the document language.'),
+            model_name="upload",
+            name="auto_language_detection",
+            field=models.BooleanField(
+                default=True,
+                help_text="Whether OCR should auto-detect the document language.",
+            ),
         ),
         migrations.AddField(
-            model_name='upload',
-            name='language_hint',
-            field=models.CharField(blank=True, help_text='Optional ISO language code when auto detection is disabled.', max_length=32, null=True),
+            model_name="upload",
+            name="language_hint",
+            field=models.CharField(
+                blank=True,
+                help_text="Optional ISO language code when auto detection is disabled.",
+                max_length=32,
+                null=True,
+            ),
         ),
         migrations.AddField(
-            model_name='upload',
-            name='ocr_mode',
-            field=models.CharField(choices=[('fast', 'Fast'), ('high_accuracy', 'High Accuracy')], default='fast', help_text='Fast is lower latency; High Accuracy spends more time for better quality.', max_length=32),
+            model_name="upload",
+            name="ocr_mode",
+            field=models.CharField(
+                choices=[("fast", "Fast"), ("high_accuracy", "High Accuracy")],
+                default="fast",
+                help_text="Fast is lower latency; High Accuracy spends more time for better quality.",
+                max_length=32,
+            ),
         ),
         migrations.AddField(
-            model_name='upload',
-            name='output_format',
-            field=models.CharField(choices=[('raw', 'Raw Text'), ('paragraph', 'Structured Paragraphs')], default='raw', help_text='Controls whether OCR returns raw text or paragraph-structured output.', max_length=32),
+            model_name="upload",
+            name="output_format",
+            field=models.CharField(
+                choices=[("raw", "Raw Text"), ("paragraph", "Structured Paragraphs")],
+                default="raw",
+                help_text="Controls whether OCR returns raw text or paragraph-structured output.",
+                max_length=32,
+            ),
         ),
     ]

@@ -11,11 +11,12 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
-from .models import Upload
-from .serializers import UploadSerializer
-from .views import UploadListCreateView, UploadRetrieveUpdateView, UploadImageView
-from .rates import DemoUserUploadRateThrottle, IPRateThrottle
 from userss.models import CustomUser
+
+from .models import Upload
+from .rates import DemoUserUploadRateThrottle, IPRateThrottle
+from .serializers import UploadSerializer
+from .views import UploadImageView, UploadListCreateView, UploadRetrieveUpdateView
 
 
 def create_temp_image_file(content=b"dummy image data"):
@@ -81,7 +82,9 @@ class UploadSerializerTests(TestCase):
         ]:
             self.assertIn(field, data)
         self.assertEqual(str(owner.id), data["owner"])
-        self.assertEqual(reverse("upload-image", kwargs={"id": upload.id}), data["image_url"])
+        self.assertEqual(
+            reverse("upload-image", kwargs={"id": upload.id}), data["image_url"]
+        )
         self.assertTrue(data["auto_language_detection"])
         self.assertEqual(upload.output_format, data["output_format"])
         self.assertIn("image_path", serializer.fields)
@@ -260,7 +263,9 @@ class UploadViewTests(TestCase):
         force_authenticate(request, user=self.user)
         response = UploadListCreateView.as_view()(request)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(Upload.objects.filter(image_hash=expected_hash, owner=self.user).exists())
+        self.assertTrue(
+            Upload.objects.filter(image_hash=expected_hash, owner=self.user).exists()
+        )
 
         # Also test: creating with a duplicate image_hash should return the existing upload, not create another
         request2 = self.factory.post(
@@ -279,7 +284,9 @@ class UploadViewTests(TestCase):
     def test_upload_create_accepts_binary_file(self):
         UploadListCreateView.throttle_classes = []
         image_bytes = b"binary-image"
-        uploaded_file = SimpleUploadedFile("binary.png", image_bytes, content_type="image/png")
+        uploaded_file = SimpleUploadedFile(
+            "binary.png", image_bytes, content_type="image/png"
+        )
         request = self.factory.post(
             "/api/v1/core/uploads/",
             {"image_file": uploaded_file},
@@ -289,7 +296,9 @@ class UploadViewTests(TestCase):
         response = UploadListCreateView.as_view()(request)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         expected_hash = hashlib.sha256(image_bytes).hexdigest()
-        self.assertTrue(Upload.objects.filter(image_hash=expected_hash, owner=self.user).exists())
+        self.assertTrue(
+            Upload.objects.filter(image_hash=expected_hash, owner=self.user).exists()
+        )
         upload = Upload.objects.get(image_hash=expected_hash, owner=self.user)
         self.assertTrue(os.path.exists(upload.image_path))
         with open(upload.image_path, "rb") as stored_file:

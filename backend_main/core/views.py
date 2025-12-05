@@ -52,7 +52,9 @@ class UploadListCreateView(generics.ListCreateAPIView):
         return self._apply_filters(base_qs)
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user, image_path=self.request.data.get("image_path"))
+        serializer.save(
+            owner=self.request.user, image_path=self.request.data.get("image_path")
+        )
 
     def _get_query_params(self):
         if hasattr(self.request, "query_params"):
@@ -71,7 +73,9 @@ class UploadListCreateView(generics.ListCreateAPIView):
         for value in values:
             if not value:
                 continue
-            extracted.extend([segment.strip() for segment in value.split(",") if segment.strip()])
+            extracted.extend(
+                [segment.strip() for segment in value.split(",") if segment.strip()]
+            )
         return extracted
 
     def _parse_datetime(self, raw_value):
@@ -86,7 +90,9 @@ class UploadListCreateView(generics.ListCreateAPIView):
 
     def _apply_filters(self, queryset):
         params = self._get_query_params() or {}
-        get_param = params.get if hasattr(params, "get") else (lambda key, default=None: None)
+        get_param = (
+            params.get if hasattr(params, "get") else (lambda key, default=None: None)
+        )
         statuses = self._extract_filter_values(params, "status")
         valid_statuses = {choice[0] for choice in Upload.STATUS_CHOICES}
         statuses = [status for status in statuses if status in valid_statuses]
@@ -100,7 +106,8 @@ class UploadListCreateView(generics.ListCreateAPIView):
         search_term = get_param("search")
         if search_term:
             queryset = queryset.filter(
-                Q(raw_text__icontains=search_term) | Q(processed_text__icontains=search_term)
+                Q(raw_text__icontains=search_term)
+                | Q(processed_text__icontains=search_term)
             )
 
         created_after = self._parse_datetime(get_param("created_after"))
@@ -128,12 +135,16 @@ class UploadListCreateView(generics.ListCreateAPIView):
                     hasher.update(chunk)
             return hasher.hexdigest()
         except Exception:
-            raise ValidationError({"image_path": "Unable to read image file from image_path."})
+            raise ValidationError(
+                {"image_path": "Unable to read image file from image_path."}
+            )
 
     def _persist_uploaded_file(self, uploaded_file):
         storage_dir = getattr(settings, "UPLOAD_STORAGE_DIR", None)
         if not storage_dir:
-            raise ValidationError({"image_file": "File storage location is not configured."})
+            raise ValidationError(
+                {"image_file": "File storage location is not configured."}
+            )
         try:
             os.makedirs(storage_dir, exist_ok=True)
         except Exception:
@@ -162,7 +173,9 @@ class UploadListCreateView(generics.ListCreateAPIView):
             )
         storage_dir = getattr(settings, "UPLOAD_STORAGE_DIR", None)
         if not storage_dir:
-            raise ValidationError({"image_file": "File storage location is not configured."})
+            raise ValidationError(
+                {"image_file": "File storage location is not configured."}
+            )
         try:
             os.makedirs(storage_dir, exist_ok=True)
         except Exception:
@@ -173,7 +186,9 @@ class UploadListCreateView(generics.ListCreateAPIView):
         destination_path = os.path.join(storage_dir, filename)
         hasher = hashlib.sha256()
         try:
-            with open(source_path, "rb") as source, open(destination_path, "wb") as destination:
+            with open(source_path, "rb") as source, open(
+                destination_path, "wb"
+            ) as destination:
                 for chunk in iter(lambda: source.read(1024 * 1024), b""):
                     if not chunk:
                         break
@@ -196,14 +211,18 @@ class UploadListCreateView(generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         token = kwargs.get("token") or request.data.get("token")
         if "token" in kwargs and not token:
-            raise ValidationError({"token": "Token is required in URL but was not provided."})
+            raise ValidationError(
+                {"token": "Token is required in URL but was not provided."}
+            )
         if token:
             from userss.models import APIToken
 
             try:
                 api_token = APIToken.objects.get(key=token, is_active=True)
             except APIToken.DoesNotExist:
-                raise ValidationError({"token": "Provided API token is invalid or inactive."})
+                raise ValidationError(
+                    {"token": "Provided API token is invalid or inactive."}
+                )
 
         uploaded_file = request.FILES.get("image_file") or request.FILES.get("image")
         new_file_created = False
@@ -217,7 +236,9 @@ class UploadListCreateView(generics.ListCreateAPIView):
             image_path = request.data.get("image_path")
             if not image_path:
                 raise ValidationError(
-                    {"image_path": "This field is required when image_file is not provided."}
+                    {
+                        "image_path": "This field is required when image_file is not provided."
+                    }
                 )
             image_hash = self._calculate_hash_from_path(image_path)
 
@@ -298,7 +319,9 @@ class UploadRetrieveUpdateView(generics.RetrieveUpdateAPIView):
         owner_id = str(request.user.id)
         if upload_id:
             cached_payload = get_cached_upload_payload(upload_id)
-            if cached_payload is not None and self._owns_cached_payload(request, cached_payload):
+            if cached_payload is not None and self._owns_cached_payload(
+                request, cached_payload
+            ):
                 return Response(cached_payload, status=status.HTTP_200_OK)
 
         try:
@@ -366,11 +389,16 @@ class UploadImageView(generics.GenericAPIView):
         upload = self.get_object()
         image_path = upload.image_path
         if not image_path or not os.path.isfile(image_path):
-            return Response({"detail": "Image file not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Image file not found."}, status=status.HTTP_404_NOT_FOUND
+            )
         content_type, _ = mimetypes.guess_type(image_path)
         response = FileResponse(
-            open(image_path, "rb"), content_type=content_type or "application/octet-stream"
+            open(image_path, "rb"),
+            content_type=content_type or "application/octet-stream",
         )
         response["Content-Length"] = os.path.getsize(image_path)
-        response["Content-Disposition"] = f'inline; filename="{os.path.basename(image_path)}"'
+        response["Content-Disposition"] = (
+            f'inline; filename="{os.path.basename(image_path)}"'
+        )
         return response
