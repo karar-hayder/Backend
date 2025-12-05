@@ -16,9 +16,7 @@ class DemoUserUploadRateThrottle(BaseThrottle):
     def allow_request(self, request, view):
         user = getattr(request, "user", None)
         if user and user.is_authenticated and hasattr(user, "role") and user.role == CustomUser.ROLE_DEMO_USER:
-            # Limit is total uploads for all demo users
-            # Optionally: if Upload has a user field, can use user=... in filter
-            uploads_count = Upload.objects.count()
+            uploads_count = Upload.objects.filter(owner=user).count()
             return uploads_count < self.rate
         return True
 

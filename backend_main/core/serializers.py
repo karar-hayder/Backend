@@ -5,10 +5,13 @@ from .models import Upload
 
 
 class UploadSerializer(serializers.ModelSerializer):
+    owner = serializers.SerializerMethodField()
+
     class Meta:
         model = Upload
         fields = [
             'id',
+            'owner',
             'image_path',
             'image_hash',
             'raw_text',
@@ -16,6 +19,12 @@ class UploadSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
+        read_only_fields = ['owner']
+
+    def get_owner(self, instance):
+        if instance.owner_id is None:
+            return None
+        return str(instance.owner_id)
 
     def to_representation(self, instance):
         cached_payload = get_cached_upload_payload(instance.id)

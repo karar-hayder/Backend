@@ -8,11 +8,18 @@ from .serializers import UploadSerializer
 
 @receiver(post_save, sender=Upload)
 def refresh_upload_cache(sender, instance, **kwargs):
-    clear_upload_cache(instance.id)
+    owner_id = str(instance.owner_id) if instance.owner_id else None
+    clear_upload_cache(upload_id=instance.id, image_hash=instance.image_hash, owner_id=owner_id)
     serializer = UploadSerializer(instance)
-    cache_upload_payload(instance.id, serializer.data)
+    cache_upload_payload(
+        instance.id,
+        serializer.data,
+        image_hash=instance.image_hash,
+        owner_id=owner_id,
+    )
 
 
 @receiver(post_delete, sender=Upload)
 def remove_upload_cache(sender, instance, **kwargs):
-    clear_upload_cache(instance.id)
+    owner_id = str(instance.owner_id) if instance.owner_id else None
+    clear_upload_cache(upload_id=instance.id, image_hash=instance.image_hash, owner_id=owner_id)

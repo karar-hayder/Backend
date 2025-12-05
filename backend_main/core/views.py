@@ -3,6 +3,9 @@ import os
 import uuid
 
 from django.conf import settings
+from django.db.models import Q
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -19,8 +22,76 @@ from .cache import (
 class UploadListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     throttle_classes = [DemoUserUploadRateThrottle, IPRateThrottle, APITokenRateThrottle]
-    queryset = Upload.objects.all().order_by('-created_at')
     serializer_class = UploadSerializer
+
+    def _base_queryset(self):
+        return Upload.objects.filter(owner=self.request.user)
+
+    def get_queryset(self):
+        base_qs = self._base_queryset().order_by('-created_at')
+        return self._apply_filters(base_qs)
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user)
+
+    def _get_query_params(self):
+        if hasattr(self.request, "query_params"):
+            return self.request.query_params
+        return self.request.GET
+
+    def _extract_filter_values(self, params, key):
+        values = []
+        if hasattr(params, "getlist"):
+            values.extend(params.getlist(key))
+        else:
+            single_value = params.get(key)
+            if single_value:
+                values.append(single_value)
+        extracted = []
+        for value in values:
+            if not value:
+                continue
+            extracted.extend([segment.strip() for segment in value.split(',') if segment.strip()])
+        return extracted
+
+    def _parse_datetime(self, raw_value):
+        if not raw_value:
+            return None
+        parsed = parse_datetime(raw_value)
+        if parsed is None:
+            return None
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+
+    def _apply_filters(self, queryset):
+        params = self._get_query_params() or {}
+        get_param = params.get if hasattr(params, "get") else (lambda key, default=None: None)
+        statuses = self._extract_filter_values(params, "status")
+        valid_statuses = {choice[0] for choice in Upload.STATUS_CHOICES}
+        statuses = [status for status in statuses if status in valid_statuses]
+        if statuses:
+            queryset = queryset.filter(status__in=statuses)
+
+        image_hash = get_param("image_hash")
+        if image_hash:
+            queryset = queryset.filter(image_hash=image_hash)
+
+        search_term = get_param("search")
+        if search_term:
+            queryset = queryset.filter(
+                Q(raw_text__icontains=search_term) | Q(processed_text__icontains=search_term)
+            )
+
+        created_after = self._parse_datetime(get_param("created_after"))
+        if created_after:
+            queryset = queryset.filter(created_at__gte=created_after)
+
+        created_before = self._parse_datetime(get_param("created_before"))
+        if created_before:
+            queryset = queryset.filter(created_at__lte=created_before)
+
+        return queryset
 
     def _set_request_value(self, request, key, value):
         if hasattr(request.data, "_mutable") and not request.data._mutable:
@@ -100,21 +171,24 @@ class UploadListCreateView(generics.ListCreateAPIView):
 
         self._set_request_value(request, "image_hash", image_hash)
 
+        owner_id = str(request.user.id)
+        base_queryset = self._base_queryset()
+
         # -- Check for existing hash in cache first --
-        cached_payload = get_cached_upload_payload(upload_id=None, image_hash=image_hash)
+        cached_payload = get_cached_upload_payload(upload_id=None, image_hash=image_hash, owner_id=owner_id)
         if cached_payload is not None:
             if new_file_created:
                 self._cleanup_file(image_path)
             return Response(cached_payload, status=status.HTTP_200_OK)
 
         # If not cached, check in DB for an upload with this hash
-        existing_upload = Upload.objects.filter(image_hash=image_hash).order_by('-created_at').first()
+        existing_upload = base_queryset.filter(image_hash=image_hash).order_by('-created_at').first()
         if existing_upload:
             if new_file_created:
                 self._cleanup_file(image_path)
             serializer = self.get_serializer(existing_upload)
             # Cache with both id and hash
-            cache_upload_payload(existing_upload.id, serializer.data, image_hash=image_hash)
+            cache_upload_payload(existing_upload.id, serializer.data, image_hash=image_hash, owner_id=owner_id)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         # No duplicate found, proceed to create
@@ -127,7 +201,7 @@ class UploadListCreateView(generics.ListCreateAPIView):
         created_upload = getattr(self, 'object', None)
         if not created_upload:
             # Fallback (DRF >= 3.0, return value needed)
-            created_upload = self.get_queryset().filter(
+            created_upload = base_queryset.filter(
                 image_hash=request.data.get("image_hash")
             ).order_by('-created_at').first()
         upload_id = str(response.data.get("id")) if "id" in response.data else (
@@ -135,36 +209,50 @@ class UploadListCreateView(generics.ListCreateAPIView):
         )
         image_hash_final = response.data.get("image_hash") or image_hash
         if upload_id and image_hash_final:
-            cache_upload_payload(upload_id, response.data, image_hash=image_hash_final)
+            cache_upload_payload(upload_id, response.data, image_hash=image_hash_final, owner_id=owner_id)
         elif upload_id:
             cache_upload_payload(upload_id, response.data)
         return response
 
 class UploadRetrieveUpdateView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated]
-    queryset = Upload.objects.all()
     serializer_class = UploadSerializer
     lookup_field = 'id'
+
+    def get_queryset(self):
+        return Upload.objects.filter(owner=self.request.user)
+
+    def _owns_cached_payload(self, request, payload):
+        if not isinstance(payload, dict):
+            return False
+        cached_owner = payload.get("owner")
+        if cached_owner is None:
+            return False
+        return str(cached_owner) == str(request.user.id)
 
     def retrieve(self, request, *args, **kwargs):
         upload_id = kwargs.get(self.lookup_field)
         cached_payload = None
         if upload_id:
             cached_payload = get_cached_upload_payload(upload_id)
-            if cached_payload is not None:
+            if cached_payload is not None and self._owns_cached_payload(request, cached_payload):
                 return Response(cached_payload, status=status.HTTP_200_OK)
         if not cached_payload and upload_id:
             try:
-                upload_obj = Upload.objects.get(id=upload_id)
+                upload_obj = self.get_queryset().get(id=upload_id)
                 with open(upload_obj.image_path, "rb") as image_file:
                     file_content = image_file.read()
                     image_hash = hashlib.sha256(file_content).hexdigest()
-                cached_payload = get_cached_upload_payload(upload_id=None, image_hash=image_hash)
+                cached_payload = get_cached_upload_payload(
+                    upload_id=None,
+                    image_hash=image_hash,
+                    owner_id=str(upload_obj.owner_id) if upload_obj.owner_id else None,
+                )
                 if cached_payload is not None:
                     return Response(cached_payload, status=status.HTTP_200_OK)
             except Upload.DoesNotExist:
                 cached_payload = get_cached_upload_payload(upload_id)
-                if cached_payload is not None:
+                if cached_payload is not None and self._owns_cached_payload(request, cached_payload):
                     return Response(cached_payload, status=status.HTTP_200_OK)
             except Exception:
                 # Could be file missing, etc, just skip to next step
@@ -173,11 +261,12 @@ class UploadRetrieveUpdateView(generics.RetrieveUpdateAPIView):
         # After retrieve, calculate image_hash from file and cache it
         try:
             image_path = response.data.get("image_path")
+            owner_id = str(request.user.id)
             if image_path:
                 with open(image_path, "rb") as image_file:
                     file_content = image_file.read()
                     image_hash_to_cache = hashlib.sha256(file_content).hexdigest()
-                cache_upload_payload(upload_id, response.data, image_hash=image_hash_to_cache)
+                cache_upload_payload(upload_id, response.data, image_hash=image_hash_to_cache, owner_id=owner_id)
             else:
                 cache_upload_payload(upload_id, response.data)
         except Exception:
@@ -190,14 +279,15 @@ class UploadRetrieveUpdateView(generics.RetrieveUpdateAPIView):
         # Clear all caches first
         clear_upload_cache(upload_id)
         # After update, recalculate image hash and cache
+        owner_id = str(request.user.id)
         try:
             image_path = response.data.get("image_path")
             if image_path:
                 with open(image_path, "rb") as image_file:
                     file_content = image_file.read()
                     image_hash = hashlib.sha256(file_content).hexdigest()
-                clear_upload_cache(image_hash=image_hash)
-                cache_upload_payload(upload_id, response.data, image_hash=image_hash)
+                clear_upload_cache(image_hash=image_hash, owner_id=owner_id)
+                cache_upload_payload(upload_id, response.data, image_hash=image_hash, owner_id=owner_id)
             else:
                 cache_upload_payload(upload_id, response.data)
         except Exception:

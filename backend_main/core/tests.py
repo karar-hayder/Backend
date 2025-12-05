@@ -1,11 +1,13 @@
 import hashlib
 import tempfile
 import os
+from datetime import timedelta
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.core.cache import cache
+from django.utils import timezone
 
 from rest_framework import status
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
@@ -30,7 +32,13 @@ def calc_sha256(path):
 class UploadModelTests(TestCase):
     def test_str_representation_includes_id_and_hash_prefix(self):
         image_path = create_temp_image_file()
+        owner = CustomUser.objects.create_user(
+            username="modeluser",
+            email="modeluser@example.com",
+            password="strongpassword",
+        )
         upload = Upload.objects.create(
+            owner=owner,
             image_path=image_path,
             image_hash="abcdef1234567890",
         )
@@ -43,7 +51,13 @@ class UploadModelTests(TestCase):
 class UploadSerializerTests(TestCase):
     def test_serializer_includes_expected_fields(self):
         image_path = create_temp_image_file()
+        owner = CustomUser.objects.create_user(
+            username="serializeruser",
+            email="serializer@example.com",
+            password="strongpassword",
+        )
         upload = Upload.objects.create(
+            owner=owner,
             image_path=image_path,
             image_hash="hash123456",
         )
@@ -51,6 +65,7 @@ class UploadSerializerTests(TestCase):
         data = serializer.data
         for field in [
             "id",
+            "owner",
             "image_path",
             "image_hash",
             "raw_text",
@@ -59,6 +74,7 @@ class UploadSerializerTests(TestCase):
             "updated_at",
         ]:
             self.assertIn(field, data)
+        self.assertEqual(str(owner.id), data["owner"])
         os.remove(image_path)
 
 
@@ -69,6 +85,11 @@ class UploadViewTests(TestCase):
         self.user = CustomUser.objects.create_user(
             username="uploader",
             email="uploader@example.com",
+            password="strongpassword",
+        )
+        self.other_user = CustomUser.objects.create_user(
+            username="other",
+            email="other@example.com",
             password="strongpassword",
         )
         self.image_path1 = create_temp_image_file(b'img1')
@@ -90,13 +111,22 @@ class UploadViewTests(TestCase):
 
     def test_upload_list_returns_uploads_for_authenticated_user(self):
         upload1 = Upload.objects.create(
+            owner=self.user,
             image_path=self.image_path1,
             image_hash="hash1",
         )
         upload2 = Upload.objects.create(
+            owner=self.user,
             image_path=self.image_path2,
             image_hash="hash2",
         )
+        other_path = create_temp_image_file(b'other')
+        Upload.objects.create(
+            owner=self.other_user,
+            image_path=other_path,
+            image_hash="hash-other",
+        )
+        os.remove(other_path)
         # Disable throttling for this test so we only validate view behavior.
         UploadListCreateView.throttle_classes = []
         request = self.factory.get("/api/v1/core/uploads/")
@@ -106,11 +136,100 @@ class UploadViewTests(TestCase):
         self.assertEqual(len(response.data), 2)
         # Should be ordered by -created_at (latest first).
         uploaded_ids = [item["id"] for item in response.data]
-        actual_qs_order = list(Upload.objects.all().order_by('-created_at').values_list("id", flat=True))
+        actual_qs_order = list(
+            Upload.objects.filter(owner=self.user).order_by('-created_at').values_list("id", flat=True)
+        )
         self.assertListEqual(
             uploaded_ids,
             [str(uid) for uid in actual_qs_order]
         )
+
+    def test_upload_list_filters_by_status_and_hash(self):
+        UploadListCreateView.throttle_classes = []
+        match = Upload.objects.create(
+            owner=self.user,
+            image_path=self.image_path1,
+            image_hash="hash-status",
+            status=Upload.STATUS_PROCESSED,
+        )
+        Upload.objects.create(
+            owner=self.user,
+            image_path=self.image_path2,
+            image_hash="hash-other-status",
+            status=Upload.STATUS_PROCESSING,
+        )
+        request = self.factory.get(
+            f"/api/v1/core/uploads/?status={Upload.STATUS_PROCESSED}&image_hash=hash-status"
+        )
+        force_authenticate(request, user=self.user)
+        response = UploadListCreateView.as_view()(request)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], str(match.id))
+
+    def test_upload_list_filters_by_search_term(self):
+        UploadListCreateView.throttle_classes = []
+        match = Upload.objects.create(
+            owner=self.user,
+            image_path=self.image_path1,
+            image_hash="hash-search-1",
+            raw_text="Invoice 123",
+        )
+        Upload.objects.create(
+            owner=self.user,
+            image_path=self.image_path2,
+            image_hash="hash-search-2",
+            processed_text="Report 456",
+        )
+        request = self.factory.get("/api/v1/core/uploads/?search=invoice")
+        force_authenticate(request, user=self.user)
+        response = UploadListCreateView.as_view()(request)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], str(match.id))
+
+    def test_upload_list_filters_by_created_range(self):
+        UploadListCreateView.throttle_classes = []
+        recent = Upload.objects.create(
+            owner=self.user,
+            image_path=self.image_path1,
+            image_hash="hash-recent",
+        )
+        older = Upload.objects.create(
+            owner=self.user,
+            image_path=self.image_path2,
+            image_hash="hash-older",
+        )
+        now = timezone.now()
+        Upload.objects.filter(pk=older.pk).update(created_at=now - timedelta(days=5))
+        Upload.objects.filter(pk=recent.pk).update(created_at=now - timedelta(hours=1))
+
+        created_after = (now - timedelta(days=1)).isoformat()
+        created_before = now.isoformat()
+        request = self.factory.get(
+            "/api/v1/core/uploads/",
+            {"created_after": created_after, "created_before": created_before},
+        )
+        force_authenticate(request, user=self.user)
+        response = UploadListCreateView.as_view()(request)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], str(recent.id))
+
+    def test_user_cannot_access_other_users_upload(self):
+        other_path = create_temp_image_file(b'other-access')
+        other_hash = hashlib.sha256(b'other-access').hexdigest()
+        foreign_upload = Upload.objects.create(
+            owner=self.other_user,
+            image_path=other_path,
+            image_hash=other_hash,
+        )
+        UploadRetrieveUpdateView.throttle_classes = []
+        request = self.factory.get(f"/api/v1/core/uploads/{foreign_upload.id}/")
+        force_authenticate(request, user=self.user)
+        response = UploadRetrieveUpdateView.as_view()(request, id=foreign_upload.id)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        os.remove(other_path)
 
     def test_upload_create_creates_new_upload(self):
         UploadListCreateView.throttle_classes = []
@@ -127,7 +246,7 @@ class UploadViewTests(TestCase):
         response = UploadListCreateView.as_view()(request)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(
-            Upload.objects.filter(image_hash=expected_hash).exists()
+            Upload.objects.filter(image_hash=expected_hash, owner=self.user).exists()
         )
 
         # Also test: creating with a duplicate image_hash should return the existing upload, not create another
@@ -140,7 +259,7 @@ class UploadViewTests(TestCase):
         response2 = UploadListCreateView.as_view()(request2)
         self.assertEqual(response2.status_code, status.HTTP_200_OK)
         self.assertEqual(response2.data["image_hash"], expected_hash)
-        self.assertEqual(Upload.objects.filter(image_hash=expected_hash).count(), 1)
+        self.assertEqual(Upload.objects.filter(image_hash=expected_hash, owner=self.user).count(), 1)
 
     def test_upload_create_accepts_binary_file(self):
         UploadListCreateView.throttle_classes = []
@@ -155,8 +274,8 @@ class UploadViewTests(TestCase):
         response = UploadListCreateView.as_view()(request)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         expected_hash = hashlib.sha256(image_bytes).hexdigest()
-        self.assertTrue(Upload.objects.filter(image_hash=expected_hash).exists())
-        upload = Upload.objects.get(image_hash=expected_hash)
+        self.assertTrue(Upload.objects.filter(image_hash=expected_hash, owner=self.user).exists())
+        upload = Upload.objects.get(image_hash=expected_hash, owner=self.user)
         self.assertTrue(os.path.exists(upload.image_path))
         with open(upload.image_path, "rb") as stored_file:
             self.assertEqual(stored_file.read(), image_bytes)
@@ -168,6 +287,7 @@ class UploadViewTests(TestCase):
             f.write(b"img4")
         expected_hash = hashlib.sha256(b"img4").hexdigest()
         upload = Upload.objects.create(
+            owner=self.user,
             image_path=self.image_path4,
             image_hash=expected_hash,
             raw_text="raw",
@@ -195,7 +315,11 @@ class UploadViewTests(TestCase):
         # Now let's verify that cache is filled for both upload_id and image_hash
         from .cache import get_cached_upload_payload
         cache_by_id = get_cached_upload_payload(upload_id=str(upload.id))
-        cache_by_hash = get_cached_upload_payload(upload_id=None, image_hash=expected_hash)
+        cache_by_hash = get_cached_upload_payload(
+            upload_id=None,
+            image_hash=expected_hash,
+            owner_id=str(upload.owner_id),
+        )
         self.assertIsNotNone(cache_by_id)
         self.assertIsNotNone(cache_by_hash)
         self.assertEqual(cache_by_id["processed_text"], "processed")
@@ -207,6 +331,7 @@ class UploadViewTests(TestCase):
             f.write(b"tobeduplicated")
         hash1 = hashlib.sha256(b"tobeduplicated").hexdigest()
         upload = Upload.objects.create(
+            owner=self.user,
             image_path=self.image_path1,
             image_hash=hash1,
             raw_text="foo",
@@ -250,6 +375,7 @@ class DemoUserUploadRateThrottleTests(TestCase):
 
     def test_demo_user_throttle_checks_demo_user_branch(self):
         Upload.objects.create(
+            owner=self.user,
             image_path=self.temp_image,
             image_hash="hashdemo",
         )

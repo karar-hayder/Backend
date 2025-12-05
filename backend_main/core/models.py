@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 import uuid
 
 class Upload(models.Model):
@@ -14,6 +15,14 @@ class Upload(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_index=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="core_uploads",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
     image_path = models.CharField(max_length=1024)
     image_hash = models.CharField(max_length=128, db_index=True)
     raw_text = models.TextField(blank=True, null=True)
@@ -32,6 +41,7 @@ class Upload(models.Model):
         indexes = [
             models.Index(fields=['id']),
             models.Index(fields=['image_hash']),
+            models.Index(fields=['owner']),
         ]
 
     def __str__(self):

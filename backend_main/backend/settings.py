@@ -26,17 +26,24 @@ ALLOWED_HOSTS = (
     if os.environ.get("ALLOWED_HOSTS")
     else ["*"] if DEBUG else []
 )
-CORS_ALLOWED_ORIGINS = (
-    os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
-    if os.environ.get("CORS_ALLOWED_ORIGINS")
-    else []
-)
+CORS_ALLOWED_ORIGINS = []
+_cors_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS")
+_cors_allow_all_env = False
+if _cors_origins_env:
+    for origin in _cors_origins_env.split(","):
+        origin = origin.strip()
+        if not origin:
+            continue
+        if origin == "*":
+            _cors_allow_all_env = True
+            continue
+        CORS_ALLOWED_ORIGINS.append(origin)
 
 
 AI_HOST = os.environ.get("AI_HOST", "http://localhost:5001")
 
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = DEBUG
+CORS_ALLOW_ALL_ORIGINS = DEBUG or _cors_allow_all_env
 CORS_ALLOW_HEADERS = [
     "Authorization",
     "Content-Type",
