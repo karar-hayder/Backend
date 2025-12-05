@@ -25,6 +25,10 @@ class CustomUser(AbstractUser):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField('email address', unique=True)
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []  # As email is used as the main field
+
     role = models.CharField(
         max_length=20,
         choices=ROLE_CHOICES,
@@ -33,6 +37,10 @@ class CustomUser(AbstractUser):
     )
 
     last_ip = models.GenericIPAddressField(null=True, blank=True, help_text="Last known user IP address")
+
+    def get_username(self):
+        # Django uses get_username in some places; we want email as the login/lookup
+        return self.email
 
     def upload_count(self):
         """Return the number of uploads this user has performed."""
