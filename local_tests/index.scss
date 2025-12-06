@@ -1,0 +1,252 @@
+.container {
+  display: flex;
+  flex-direction: row;
+  justify-content: stretch;
+  align-items: flex-start;
+  min-height: 100vh;
+  gap: 32px;
+  background: #f6f8fa;
+  font-family: 'Inter', 'SF Pro Display', 'Segoe UI', Arial, Helvetica, sans-serif;
+  font-size: 16px;
+}
+
+.panel {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px 0 rgba(140, 150, 160, 0.10);
+  padding: 28px 28px 18px 28px;
+  margin-bottom: 16px;
+  min-width: 340px;
+  max-width: 500px;
+}
+
+.form-group {
+  margin-bottom: 18px;
+}
+
+.form-group label {
+  font-weight: 500;
+  font-size: 15px;
+  margin-bottom: 4px;
+  display: block;
+}
+
+input[type="text"],
+input[type="password"],
+textarea,
+select {
+  width: 100%;
+  padding: 7px 11px;
+  font-size: 15px;
+  border: 1px solid #ccd0d5;
+  border-radius: 6px;
+  background: #f5f6fa;
+  box-sizing: border-box;
+  transition: border 0.2s;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+textarea:focus,
+select:focus {
+  border: 1.5px solid #3875e6;
+  outline: none;
+}
+
+textarea {
+  min-height: 60px;
+  resize: vertical;
+  font-family: monospace;
+}
+
+.button-group {
+  display: flex;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+button, .secondary {
+  appearance: none;
+  border: none;
+  outline: none;
+  padding: 7px 22px;
+  border-radius: 6px;
+  background: #3887e6;
+  color: white;
+  font-size: 15.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.16s;
+}
+
+button:disabled {
+  background: #c2c9d6;
+  cursor: not-allowed;
+}
+
+button.secondary,
+.secondary {
+  background: #f0f2f6;
+  color: #222c40;
+  border: 1px solid #d6dae1;
+}
+
+.preset-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.help-text {
+  font-size: 12.5px;
+  color: #86868b;
+  margin-top: 2px;
+}
+
+.stats {
+  display: flex;
+  gap: 23px;
+  margin-top: 12px;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-value {
+  font-weight: 700;
+  font-size: 22px;
+  background: linear-gradient(90deg, #57b4fb, #00c8c8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 1px;
+}
+
+.stat-label {
+  font-size: 12.5px;
+  color: #86868b;
+}
+
+.status-indicator {
+  padding: 7px 17px;
+  border-radius: 16px;
+  font-weight: 600;
+  display: inline-block;
+  font-size: 15px;
+  margin-bottom: 13px;
+  transition: background 0.3s, color 0.3s;
+  background: #ecedf0;
+  color: #587197;
+}
+.status-connected {
+  background: #e6faea;
+  color: #23ad49;
+}
+.status-connecting {
+  background: #f5ffe6;
+  color: #acc900;
+}
+.status-disconnected {
+  background: #fdeded;
+  color: #d63b36;
+}
+.status-error {
+  background: #ffe6e6;
+  color: #c41f2f;
+}
+
+.token-input-group {
+  display: flex;
+  align-items: center;
+}
+.token-input-group input {
+  flex: 1;
+}
+.token-toggle {
+  margin-left: 8px;
+  padding: 6px 14px;
+  background: #e5e5fc;
+  color: #4136a3;
+  font-weight: 500;
+  border-radius: 5px;
+  border: 1px solid #c0c0ea;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.18s;
+}
+.token-toggle:hover {
+  background: #d3d3f8;
+}
+
+.message-log {
+  max-height: 64vh;
+  min-height: 150px;
+  overflow-y: auto;
+  background: #fafbfc;
+  padding: 13px;
+  border-radius: 7px;
+  border: 1px solid #edf0f2;
+  box-shadow: 0 2px 6px 0 rgba(140, 150, 160, 0.09) inset;
+  font-size: 14.5px;
+}
+
+.message-entry {
+  margin-bottom: 14px;
+  padding: 7px 10px 7px 16px;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 2px 10px 0 #f5f8fa;
+  border-left: 4px solid #d1def7;
+}
+
+.message-entry.sent {
+  border-left-color: #3887e6;
+  background: #e9f1ff;
+}
+.message-entry.received {
+  border-left-color: #23ad49;
+  background: #eafbf0;
+}
+.message-entry.error {
+  border-left-color: #c92d39;
+  background: #fdebec;
+}
+.message-entry.info {
+  border-left-color: #4e6187;
+  background: #f3f7fc;
+}
+
+.message-time {
+  display: block;
+  font-size: 11px;
+  color: #a2adc7;
+  margin-bottom: 2px;
+}
+
+.message-content {
+  font-family: Menlo, monospace, 'SF Mono', 'Ubuntu Mono', Consolas;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-controls {
+  display: flex;
+  gap: 11px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1050px) {
+  .container {
+    flex-direction: column;
+    gap: 15px;
+    padding: 16px;
+  }
+  .panel {
+    max-width: 100vw;
+    min-width: 0;
+  }
+  .message-log {
+    max-height: 38vh;
+  }
+}
+

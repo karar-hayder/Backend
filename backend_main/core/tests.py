@@ -10,7 +10,6 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
-
 from userss.models import CustomUser
 
 from .models import Upload

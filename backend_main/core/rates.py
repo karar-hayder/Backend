@@ -1,10 +1,9 @@
 from datetime import timedelta
 
+from core.models import Upload
 from django.conf import settings
 from django.utils import timezone
 from rest_framework.throttling import BaseThrottle
-
-from core.models import Upload
 from userss.models import APIToken, CustomUser
 
 

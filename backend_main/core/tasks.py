@@ -17,7 +17,6 @@ def process_upload_ocr(upload_id):
     Stream incremental OCR text back to websocket as it arrives.
     """
     import requests
-
     from core.models import Upload
 
     logger.info(f"Starting OCR processing for Upload ID: {upload_id}")
@@ -50,16 +49,24 @@ def process_upload_ocr(upload_id):
         )
         channel_layer = None
 
-    group_name = f"Upload_{upload_id}"
+    # Only use a single group per user for all coms, if owner is set
+    group_name = None
+    if hasattr(upload, "owner") and upload.owner_id:
+        group_name = f"User_{upload.owner_id}"
+    else:
+        logger.warning(
+            f"Upload {upload_id} has no owner - cannot send websocket message to user group"
+        )
 
     def send_ws_message(content):
         """
-        Send WebSocket message via channel layer.
+        Send WebSocket message via channel layer to the user's single group.
         If Redis/channel layer is unavailable, log but don't fail the task.
         """
-        # Skip if channel layer is not available
-        if channel_layer is None:
-            logger.debug(f"Skipping WebSocket message - channel layer unavailable")
+        if channel_layer is None or not group_name:
+            logger.debug(
+                f"Skipping WebSocket message - channel layer or user group unavailable"
+            )
             return
 
         try:
@@ -67,16 +74,15 @@ def process_upload_ocr(upload_id):
                 group_name,
                 {
                     "type": "model_update",
+                    "event": "Upload.status",
                     "instance": content,
                 },
             )
             logger.debug(f"WebSocket group_send to {group_name}: {content}")
         except Exception as ws_e:
-            # Catch all exceptions - Redis connection issues, channel layer errors, etc.
             error_msg = str(ws_e)
             error_type = type(ws_e).__name__
 
-            # Check if it's a Redis/connection error
             is_redis_error = (
                 "redis" in error_msg.lower()
                 or "6379" in error_msg
@@ -87,14 +93,12 @@ def process_upload_ocr(upload_id):
             )
 
             if is_redis_error:
-                # Redis connection issues - log as warning but don't fail task
                 logger.warning(
                     f"Redis/channel layer unavailable for WebSocket message (upload {upload_id}): {ws_e}. "
                     "Task will continue, but clients won't receive real-time updates. "
                     "Check Redis connection: redis-cli ping"
                 )
             else:
-                # Other WebSocket/channel layer errors - log as error but don't fail task
                 logger.error(
                     f"Failed to send WebSocket message for upload {upload_id}: {ws_e}",
                     exc_info=True,

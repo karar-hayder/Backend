@@ -1,5 +1,9 @@
 import hashlib
 import logging
+
+# Dedicated logger for consumers, logs to file in this directory
+import os
+from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, Optional
 
 import jwt
@@ -15,7 +19,17 @@ from .cache import get_cached_upload_payload
 from .models import Upload
 from .serializers import UploadSerializer
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("core.consumers")
+logger.setLevel(logging.INFO)
+
+_logfile = os.path.join(os.path.dirname(__file__), "consumers.log")
+if not logger.handlers:
+    file_handler = RotatingFileHandler(
+        _logfile, maxBytes=2 * 1024 * 1024, backupCount=2
+    )
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
 User = get_user_model()
 
@@ -96,16 +110,17 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
     """
     WebSocket consumer for CRUD + status updates for the Upload model.
 
-    Clients can join channels for specific instance_ids to receive status updates.
-    The URL route may supply `instance_id` as a kwarg. If none provided, joins "all" group.
+    On connection, each authenticated user joins a unique group based on their user ID.
+    All CRUD operations and status updates are communicated through the user's group.
 
     Supported commands:
       - subscribe: Subscribe to status updates
-      - retrieve: Get a specific upload instance
+      - retrieve: Get a specific upload instance (by id in message)
       - create: Create a new upload
-      - update: Update an existing upload (partial/full)
-      - delete: Delete an upload
+      - update: Update an existing upload (by id in message)
+      - delete: Delete an upload (by id in message)
       - list: List all uploads for authenticated user (max 100)
+      - task: Perform a task (if needed, for later extension)
     """
 
     @staticmethod
@@ -141,8 +156,6 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
             Authenticated user object or None
         """
         user = self._get_user_from_scope()
-
-        # If already authenticated, return user
         if user and self._is_authenticated_user(user):
             return user
 
@@ -153,23 +166,13 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
             if user:
                 self.scope["user"] = user
                 return user
-
         return None
 
-    def _get_group_name(self, instance_id: Optional[str] = None) -> str:
-        """Get channel group name for instance or all."""
-        if instance_id:
-            return f"{MODEL_NAME}_{instance_id}"
-        return GROUP_ALL
+    def _get_user_group_name(self, user: Any) -> str:
+        """Return the channel group name for this user."""
+        return f"{MODEL_NAME}_user_{user.id}"
 
     async def _safe_send_json(self, content: Dict[str, Any]) -> bool:
-        """
-        Safely send JSON message, checking connection state first.
-
-        Returns:
-            True if message was sent, False if connection is closed
-        """
-        # Check if connection is closed
         if hasattr(self, "close_code") and self.close_code is not None:
             logger.debug(f"Skipping send - connection closed (code: {self.close_code})")
             return False
@@ -185,53 +188,43 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                 or "already completed" in error_msg
             ):
                 logger.debug(f"Client disconnected during send: {e}")
-                # Mark as closed
                 if not hasattr(self, "close_code") or self.close_code is None:
                     self.close_code = 1001
                 return False
-            # Re-raise if it's a different error
             raise
 
     async def connect(self):
-        """Handle WebSocket connection."""
         try:
             logger.info("WebSocket connection attempt")
-            # Initialize close_code to None (connection is open)
             self.close_code = None
-            # Extract instance_id from URL route
-            self.instance_id = self.scope["url_route"]["kwargs"].get("instance_id")
-            logger.info(f"Instance ID: {self.instance_id}")
-
-            # Store query string for token extraction
             self.token = self.scope.get("query_string", b"").decode()
-            logger.info(f"Token present: {bool(self.token)}")
 
-            # Authenticate user (optional for connection, required for some commands)
             user = await self._authenticate_user()
             logger.info(
                 f"User authenticated: {user is not None}, User ID: {user.id if user else None}"
             )
 
-            # Join appropriate channel group
-            self.model_group_name = self._get_group_name(self.instance_id)
-            logger.info(f"Joining group: {self.model_group_name}")
-            await self.channel_layer.group_add(self.model_group_name, self.channel_name)
+            if not user or not self._is_authenticated_user(user):
+                await self.accept()
+                await self.send_json({"error": "Authentication required"})
+                await self.close()
+                return
+
+            self.user = user
+            self.user_group_name = self._get_user_group_name(user)
+
+            logger.info(f"Joining user group: {self.user_group_name}")
+            await self.channel_layer.group_add(self.user_group_name, self.channel_name)
 
             await self.accept()
             logger.info("WebSocket connection accepted")
 
-            # Send initial status if instance_id provided
-            if self.instance_id:
-                try:
-                    instance_data = await self.get_instance_data(self.instance_id)
-                    if instance_data:
-                        await self.send_json(instance_data)
-                        logger.info("Initial status sent")
-                except Exception as e:
-                    logger.error(f"Error sending initial status: {e}", exc_info=True)
+            # Optionally, send initial list of uploads on connect
+            data = await self.get_user_uploads(user)
+            await self.send_json({"type": EVENT_LIST, "list": data})
+
         except Exception as e:
             logger.error(f"Error in connect: {e}", exc_info=True)
-            # Try to accept anyway to send error
             try:
                 await self.accept()
                 await self.send_json({"error": f"Connection error: {str(e)}"})
@@ -241,14 +234,13 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
 
     async def disconnect(self, close_code):
         logger.info(f"WebSocket disconnecting, close_code: {close_code}")
-        # Store close_code to prevent sending messages after disconnect
         self.close_code = close_code
-        if hasattr(self, "model_group_name"):
+        if hasattr(self, "user_group_name"):
             try:
                 await self.channel_layer.group_discard(
-                    self.model_group_name, self.channel_name
+                    self.user_group_name, self.channel_name
                 )
-                logger.info(f"Left group: {self.model_group_name}")
+                logger.info(f"Left group: {self.user_group_name}")
             except Exception as e:
                 logger.error(f"Error leaving group: {e}", exc_info=True)
 
@@ -318,7 +310,7 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
 
     async def _handle_retrieve(self, content: Dict[str, Any]):
         """Handle retrieve command."""
-        instance_id = content.get("instance_id", self.instance_id)
+        instance_id = content.get("instance_id", None)
         payload = await self.get_instance_data(instance_id)
         await self.send_json(payload)
 
@@ -483,7 +475,7 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
         self, data: Dict[str, Any], user: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
-        Create a new Upload object.
+        Create a new Upload object or return existing if duplicate by hash for same user.
 
         Supports:
         - image_path: Server-side file path
@@ -502,24 +494,101 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
         import os
         import uuid
 
+        def _find_duplicate_upload(image_hash, user):
+            """
+            Check if an upload exists with the given image_hash for this user.
+            """
+            # No hash: cannot check duplicates
+            # Added logging for duplicate upload lookup
+            if not image_hash:
+                logger.debug("No image_hash provided for duplicate upload check.")
+                return None
+            query = Upload.objects.filter(image_hash=image_hash)
+            if user and hasattr(user, "id"):
+                logger.debug(
+                    f"Checking duplicate upload for user ID: {user.id}, image_hash: {image_hash}"
+                )
+                query = query.filter(owner=user)
+            else:
+                logger.debug(
+                    f"Checking duplicate upload for anonymous user, image_hash: {image_hash}"
+                )
+            try:
+                result = query.first() or None
+                if result:
+                    logger.info(
+                        f"Duplicate upload found: ID={result.id} (user={getattr(user, 'id', None)}, image_hash={image_hash})"
+                    )
+                else:
+                    logger.debug(
+                        f"No duplicate upload found for image_hash: {image_hash}, user: {getattr(user, 'id', None)}"
+                    )
+                return result
+            except Exception as e:
+                logger.error(
+                    f"Error while checking for duplicate upload (user={getattr(user, 'id', None)}, image_hash={image_hash}): {e}",
+                    exc_info=True,
+                )
+                return None
+
         try:
             data = dict(data or {})
             data.pop("id", None)  # Prevent ID override
-            destination_path = None
 
-            # Handle base64 image upload
-            image_base64 = data.pop("image_base64", None)
+            # Pre-extract and pre-compute hash if possible
+            image_hash = data.get("image_hash")
+            image_path = data.get("image_path")
+            image_base64 = data.get("image_base64", None)
+
+            # If image_base64 is provided and no hash, try to compute hash from raw data
+            base64_hash = None
+            image_data = None
+            if image_base64:
+                if isinstance(image_base64, str):
+                    # Remove data URL prefix if present (e.g., "data:image/png;base64,...")
+                    if "," in image_base64:
+                        image_base64_body = image_base64.split(",", 1)[1]
+                    else:
+                        image_base64_body = image_base64
+                    try:
+                        image_data = base64.b64decode(image_base64_body, validate=True)
+                    except Exception:
+                        image_data = None
+                if image_data:
+                    hasher = hashlib.sha256()
+                    hasher.update(image_data)
+                    base64_hash = hasher.hexdigest()
+            # Prefer given hash, otherwise hash from predecoded base64, otherwise compute from path later
+            hash_for_dup_check = image_hash or base64_hash
+
+            # Try duplicate detection as early as possible, before saving/creating any files/instances
+            duplicate_instance = _find_duplicate_upload(hash_for_dup_check, user)
+            if duplicate_instance:
+                result_serializer = UploadSerializer(instance=duplicate_instance)
+                result_data = result_serializer.data
+                return {
+                    "type": EVENT_CREATED,
+                    "instance": result_data,
+                    "duplicate": True,
+                    "message": "Duplicate found by hash. Returning existing upload for this user.",
+                }
+
+            # If no duplicate found, continue with saving/uploading file
+
+            destination_path = None
             if image_base64:
                 try:
-                    # Decode base64 data
-                    if isinstance(image_base64, str):
-                        # Remove data URL prefix if present (e.g., "data:image/png;base64,...")
-                        original_base64 = image_base64
+                    # image_data may be None if previous decode failed (should rarely happen at this point)
+                    if image_data is None:
+                        # Remove data URL prefix if present
                         if "," in image_base64:
-                            image_base64 = image_base64.split(",", 1)[1]
-
+                            image_base64_body = image_base64.split(",", 1)[1]
+                        else:
+                            image_base64_body = image_base64
                         try:
-                            image_data = base64.b64decode(image_base64, validate=True)
+                            image_data = base64.b64decode(
+                                image_base64_body, validate=True
+                            )
                         except Exception as decode_error:
                             return {
                                 "type": EVENT_CREATED,
@@ -527,13 +596,6 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                                     "image_base64": f"Invalid base64 encoding: {str(decode_error)}"
                                 },
                             }
-                    else:
-                        return {
-                            "type": EVENT_CREATED,
-                            "error": {
-                                "image_base64": "Invalid base64 data format. Expected string."
-                            },
-                        }
 
                     if not image_data or len(image_data) == 0:
                         return {
@@ -602,11 +664,10 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                     filename = f"{uuid.uuid4()}{extension}"
                     destination_path = os.path.join(storage_dir, filename)
 
-                    # Write file and compute hash simultaneously
+                    # Write file and compute hash simultaneously (hash is already computed, but keep logic for completeness)
                     hasher = hashlib.sha256()
                     try:
                         with open(destination_path, "wb") as f:
-                            # Process in chunks to handle large files
                             chunk_size = CHUNK_SIZE
                             for i in range(0, len(image_data), chunk_size):
                                 chunk = image_data[i : i + chunk_size]
@@ -625,7 +686,6 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                                 "image_base64": f"Failed to write image file: {str(write_error)}"
                             },
                         }
-
                     data["image_path"] = destination_path
                     data["image_hash"] = hasher.hexdigest()
                 except Exception as e:
@@ -656,14 +716,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                     }
                 data["image_hash"] = hash_result
 
-            # Validate that we have either image_path or image_hash
-            if not data.get("image_path") and not data.get("image_hash"):
-                return {
-                    "type": EVENT_CREATED,
-                    "error": {
-                        "image": "Either image_path (server-side) or image_base64 (client upload) is required."
-                    },
-                }
+            # After base64, check again as user could have sent server-side image_path only (edge case)
+            # But we already checked at top if hash present
+            # Duplicate detection must happen BEFORE any instance is created/saved!
 
             # Validate required fields
             if not data.get("image_path"):
@@ -676,6 +731,27 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                 return {
                     "type": EVENT_CREATED,
                     "error": {"image_hash": "image_hash is required after processing."},
+                }
+
+            # Final double-check for duplicate (extremely rare, but covers any race condition!)
+            image_hash_for_final = data.get("image_hash")
+            final_duplicate_instance = _find_duplicate_upload(
+                image_hash_for_final, user
+            )
+            if final_duplicate_instance:
+                # Clean up file if we just saved it
+                if destination_path and os.path.exists(destination_path):
+                    try:
+                        os.remove(destination_path)
+                    except Exception:
+                        pass
+                result_serializer = UploadSerializer(instance=final_duplicate_instance)
+                result_data = result_serializer.data
+                return {
+                    "type": EVENT_CREATED,
+                    "instance": result_data,
+                    "duplicate": True,
+                    "message": "Duplicate found by hash. Returning existing upload for this user.",
                 }
 
             # Create serializer (owner is read-only, so we pass it to save())
@@ -821,15 +897,18 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
         """
         try:
             groups = {GROUP_ALL}
-            if hasattr(self, "instance_id") and self.instance_id:
-                groups.add(self._get_group_name(self.instance_id))
 
-            # Also add instance-specific group if we have instance data
+            # If the consumer has a user, add that user's group
+            if hasattr(self, "user") and self.user and hasattr(self.user, "id"):
+                user_group = self._get_user_group_name(self.user)
+                groups.add(user_group)
+
+            # Add all relevant user group(s) corresponding to instance owners if known
             instance_data = payload.get("instance")
             if instance_data and isinstance(instance_data, dict):
-                instance_id = instance_data.get("id")
-                if instance_id:
-                    groups.add(self._get_group_name(instance_id))
+                owner_id = instance_data.get("owner")
+                if owner_id:
+                    groups.add(f"{MODEL_NAME}_user_{owner_id}")
 
             for group in groups:
                 try:

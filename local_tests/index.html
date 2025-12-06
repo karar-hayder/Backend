@@ -4,358 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebSocket UploadStatusConsumer Tester</title>
-  <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: #f5f5f7;
-      color: #1d1d1f;
-      line-height: 1.6;
-      padding: 20px;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      display: grid;
-      grid-template-columns: 400px 1fr;
-      gap: 20px;
-    }
-
-    .panel {
-      background: white;
-      border-radius: 12px;
-      padding: 24px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-
-    .panel h2 {
-      font-size: 20px;
-      margin-bottom: 16px;
-      color: #1d1d1f;
-      border-bottom: 2px solid #f5f5f7;
-      padding-bottom: 8px;
-    }
-
-    .panel h3 {
-      font-size: 16px;
-      margin: 16px 0 8px 0;
-      color: #424245;
-    }
-
-    .form-group {
-      margin-bottom: 16px;
-    }
-
-    label {
-      display: block;
-      font-size: 14px;
-      font-weight: 500;
-      margin-bottom: 6px;
-      color: #424245;
-    }
-
-    input[type="text"],
-    input[type="password"],
-    select,
-    textarea {
-      width: 100%;
-      padding: 10px 12px;
-      border: 1px solid #d2d2d7;
-      border-radius: 8px;
-      font-size: 14px;
-      font-family: inherit;
-      transition: border-color 0.2s;
-    }
-
-    input:focus,
-    select:focus,
-    textarea:focus {
-      outline: none;
-      border-color: #0071e3;
-    }
-
-    textarea {
-      resize: vertical;
-      font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
-      font-size: 13px;
-    }
-
-    button {
-      background: #0071e3;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.2s;
-      width: 100%;
-    }
-
-    button:hover:not(:disabled) {
-      background: #0077ed;
-    }
-
-    button:disabled {
-      background: #d2d2d7;
-      cursor: not-allowed;
-    }
-
-    button.secondary {
-      background: #f5f5f7;
-      color: #1d1d1f;
-    }
-
-    button.secondary:hover:not(:disabled) {
-      background: #e8e8ed;
-    }
-
-    button.danger {
-      background: #ff3b30;
-    }
-
-    button.danger:hover:not(:disabled) {
-      background: #ff453a;
-    }
-
-    .status-indicator {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      margin-bottom: 16px;
-    }
-
-    .status-indicator::before {
-      content: '';
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      display: inline-block;
-    }
-
-    .status-connected {
-      background: #e6f7e6;
-      color: #1a7f1a;
-    }
-
-    .status-connected::before {
-      background: #1a7f1a;
-      animation: pulse 2s infinite;
-    }
-
-    .status-disconnected {
-      background: #ffe6e6;
-      color: #d11a1a;
-    }
-
-    .status-disconnected::before {
-      background: #d11a1a;
-    }
-
-    .status-connecting {
-      background: #fff4e6;
-      color: #d97706;
-    }
-
-    .status-connecting::before {
-      background: #d97706;
-      animation: pulse 1s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    .message-log {
-      height: 600px;
-      overflow-y: auto;
-      background: #1d1d1f;
-      border-radius: 8px;
-      padding: 16px;
-      font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
-      font-size: 13px;
-    }
-
-    .message-entry {
-      margin-bottom: 12px;
-      padding: 10px;
-      border-radius: 6px;
-      border-left: 3px solid transparent;
-    }
-
-    .message-entry.sent {
-      background: rgba(0, 113, 227, 0.1);
-      border-left-color: #0071e3;
-    }
-
-    .message-entry.received {
-      background: rgba(26, 127, 26, 0.1);
-      border-left-color: #1a7f1a;
-    }
-
-    .message-entry.error {
-      background: rgba(255, 59, 48, 0.1);
-      border-left-color: #ff3b30;
-    }
-
-    .message-entry.info {
-      background: rgba(255, 255, 255, 0.05);
-      border-left-color: #d2d2d7;
-    }
-
-    .message-time {
-      color: #86868b;
-      font-size: 11px;
-      margin-bottom: 4px;
-    }
-
-    .message-content {
-      color: #f5f5f7;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    .message-content code {
-      background: rgba(255, 255, 255, 0.1);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 12px;
-    }
-
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-
-    .stat-item {
-      background: #f5f5f7;
-      padding: 12px;
-      border-radius: 8px;
-      text-align: center;
-    }
-
-    .stat-value {
-      font-size: 24px;
-      font-weight: 600;
-      color: #0071e3;
-    }
-
-    .stat-label {
-      font-size: 12px;
-      color: #86868b;
-      margin-top: 4px;
-    }
-
-    .button-group {
-      display: flex;
-      gap: 8px;
-    }
-
-    .button-group button {
-      flex: 1;
-    }
-
-    .preset-buttons {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 8px;
-      margin-top: 12px;
-    }
-
-    .preset-buttons button {
-      font-size: 12px;
-      padding: 8px 12px;
-    }
-
-    .token-input-group {
-      position: relative;
-    }
-
-    .token-toggle {
-      position: absolute;
-      right: 8px;
-      top: 50%;
-      transform: translateY(-50%);
-      background: transparent;
-      border: none;
-      color: #86868b;
-      cursor: pointer;
-      padding: 4px 8px;
-      font-size: 12px;
-      width: auto;
-    }
-
-    .token-toggle:hover {
-      color: #1d1d1f;
-    }
-
-    .help-text {
-      font-size: 12px;
-      color: #86868b;
-      margin-top: 4px;
-    }
-
-    .checkbox-group {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .checkbox-group input[type="checkbox"] {
-      width: auto;
-    }
-
-    input[type="file"] {
-      padding: 8px;
-      border: 1px dashed #d2d2d7;
-      background: #f5f5f7;
-      cursor: pointer;
-    }
-
-    input[type="file"]:hover {
-      border-color: #0071e3;
-      background: #e8f4fd;
-    }
-
-    #fileInfo {
-      padding: 8px;
-      border-radius: 6px;
-      background: #f5f5f7;
-      font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
-    }
-
-    .log-controls {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .log-controls button {
-      flex: 1;
-      padding: 8px;
-      font-size: 12px;
-    }
-
-    @media (max-width: 1024px) {
-      .container {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="index.css">
 </head>
 <body>
   <div class="container">
@@ -372,12 +21,6 @@
           <label for="serverUrl">Server URL</label>
           <input type="text" id="serverUrl" value="localhost:8000" placeholder="localhost:8000">
           <div class="help-text">WebSocket server host and port</div>
-        </div>
-
-        <div class="form-group">
-          <label for="instanceId">Instance ID (Optional)</label>
-          <input type="text" id="instanceId" placeholder="UUID for specific instance">
-          <div class="help-text">Leave blank to connect to 'all' group</div>
         </div>
 
         <div class="form-group">
@@ -418,7 +61,7 @@
 
         <div class="form-group" id="commandInstanceGroup">
           <label for="commandInstanceId">Instance ID</label>
-          <input type="text" id="commandInstanceId" placeholder="UUID (optional)">
+          <input type="text" id="commandInstanceId" placeholder="UUID">
         </div>
 
         <div class="form-group" id="fileUploadGroup" style="display: none;">
@@ -479,19 +122,20 @@
       </div>
     </div>
   </div>
-
   <script>
-    // Global error handler to prevent page refresh on unhandled errors
+    // Prevent page reload on all uncaught errors or promise rejections
     window.addEventListener('error', (event) => {
-      console.error('Global error:', event.error);
       event.preventDefault();
-      return false;
-    });
-    
+      event.stopImmediatePropagation();
+      // Custom logging
+      console.error('Global error:', event.error ? event.error : event.message);
+      return false; // Prevents browser default error handling
+    }, true);
     window.addEventListener('unhandledrejection', (event) => {
-      console.error('Unhandled promise rejection:', event.reason);
       event.preventDefault();
-    });
+      event.stopImmediatePropagation();
+      console.error('Unhandled promise rejection:', event.reason);
+    }, true);
 
     // State
     let ws = null;
@@ -502,7 +146,6 @@
     // DOM Elements
     const statusIndicator = document.getElementById('statusIndicator');
     const serverUrlInput = document.getElementById('serverUrl');
-    const instanceIdInput = document.getElementById('instanceId');
     const accessTokenInput = document.getElementById('accessToken');
     const tokenToggle = document.getElementById('tokenToggle');
     const autoReconnectCheck = document.getElementById('autoReconnect');
@@ -541,19 +184,15 @@
         fileInfo.textContent = '';
         return;
       }
-
       if (!file.type.startsWith('image/')) {
         fileInfo.textContent = '⚠️ Please select an image file';
         fileInfo.style.color = '#ff3b30';
         return;
       }
-
       fileInfo.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(2)} KB) - Converting...`;
       fileInfo.style.color = '#86868b';
-
       try {
         const base64 = await fileToBase64(file);
-        // Store base64 for use when sending
         imageFileInput.dataset.base64 = base64;
         fileInfo.textContent = `✅ ${file.name} (${(file.size / 1024).toFixed(2)} KB) - Ready to upload`;
         fileInfo.style.color = '#1a7f1a';
@@ -563,13 +202,11 @@
       }
     });
 
-    // Helper function to convert file to base64
     function fileToBase64(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => {
           const result = reader.result;
-          // Remove data URL prefix if present
           const base64 = result.includes(',') ? result.split(',')[1] : result;
           resolve(base64);
         };
@@ -578,37 +215,26 @@
       });
     }
 
-    // Command type change handler
+    // Toggle data UI by command type
     commandTypeSelect.addEventListener('change', () => {
       const type = commandTypeSelect.value;
       const needsData = ['create', 'update'].includes(type);
-      const needsInstanceId = type !== 'list';
       const isCreate = type === 'create';
-      
+
       commandDataGroup.style.display = needsData ? 'block' : 'none';
       fileUploadGroup.style.display = isCreate ? 'block' : 'none';
-      commandInstanceGroup.style.display = needsInstanceId ? 'block' : 'none';
-      
-      if (!needsData) {
-        commandDataTextarea.value = '';
-      }
-      
-      // Clear file input when switching away from create
+      commandInstanceGroup.style.display = type !== 'list' ? 'block' : 'none';
+      if (!needsData) commandDataTextarea.value = '';
       if (!isCreate) {
         imageFileInput.value = '';
         imageFileInput.dataset.base64 = '';
         fileInfo.textContent = '';
       }
-      
-      // Update placeholder
-      if (type === 'create') {
+      if (type === 'create')
         commandDataTextarea.placeholder = '{"image_path": "path/to/image.png"} or use file upload above';
-      } else if (type === 'update') {
+      else if (type === 'update')
         commandDataTextarea.placeholder = '{"status": "processed", "processed_text": "..."}';
-      }
     });
-
-    // Initialize command UI
     commandTypeSelect.dispatchEvent(new Event('change'));
 
     // Logging functions
@@ -617,9 +243,19 @@
       const entry = { type, content, data, timestamp };
       messageHistory.push(entry);
 
+      // Also log to console
+      if (type === 'error') {
+        console.error(`[${timestamp}] [${type}] ${content}`, data || '');
+      } else if (type === 'received') {
+        console.info(`[${timestamp}] [${type}] ${content}`, data || '');
+      } else if (type === 'sent') {
+        console.log(`[${timestamp}] [${type}] ${content}`, data || '');
+      } else {
+        console.debug(`[${timestamp}] [${type}] ${content}`, data || '');
+      }
+
       const entryDiv = document.createElement('div');
       entryDiv.className = `message-entry ${type}`;
-      
       const timeDiv = document.createElement('div');
       timeDiv.className = 'message-time';
       timeDiv.textContent = timestamp;
@@ -627,30 +263,24 @@
 
       const contentDiv = document.createElement('div');
       contentDiv.className = 'message-content';
-      
-      if (data) {
+      if (data)
         contentDiv.textContent = `${content}\n${JSON.stringify(data, null, 2)}`;
-      } else {
+      else
         contentDiv.textContent = content;
-      }
-      
       entryDiv.appendChild(contentDiv);
       messageLog.appendChild(entryDiv);
       messageLog.scrollTop = messageLog.scrollHeight;
 
-      // Update stats
       if (type === 'sent') stats.sent++;
       else if (type === 'received') stats.received++;
       else if (type === 'error') stats.errors++;
       updateStats();
     }
-
     function updateStats() {
       document.getElementById('statSent').textContent = stats.sent;
       document.getElementById('statReceived').textContent = stats.received;
       document.getElementById('statErrors').textContent = stats.errors;
     }
-
     function updateStatus(status, text) {
       statusIndicator.className = `status-indicator status-${status}`;
       statusIndicator.textContent = text;
@@ -660,11 +290,7 @@
     function getWebSocketURL() {
       const serverUrl = serverUrlInput.value.trim() || 'localhost:8000';
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const instanceId = instanceIdInput.value.trim();
-      
-      if (instanceId) {
-        return `${protocol}//${serverUrl}/ws/core/upload/${instanceId}/`;
-      }
+      // All comms through one group: no instanceId in URL!
       return `${protocol}//${serverUrl}/ws/core/upload/`;
     }
 
@@ -673,24 +299,19 @@
         logMessage('info', 'Already connected');
         return;
       }
-
       const url = getWebSocketURL();
       const token = accessTokenInput.value.trim();
-      
       if (!token) {
         logMessage('error', 'Access token is required');
         return;
       }
-
-      // Save token to localStorage
+      // Save token
       localStorage.setItem('ws_access_token', token);
-
       const fullUrl = `${url}?token=${encodeURIComponent(token)}`;
-      
+
       updateStatus('connecting', 'Connecting...');
       connectBtn.disabled = true;
       disconnectBtn.disabled = false;
-
       logMessage('info', `Connecting to ${url.replace(/token=[^&]*/, 'token=***')}`);
 
       try {
@@ -707,30 +328,90 @@
           connectBtn.disabled = false;
           disconnectBtn.disabled = true;
           sendBtn.disabled = true;
-          
           logMessage('info', `Disconnected (code: ${event.code}, reason: ${event.reason || 'none'})`);
-          
-          // Don't auto-reconnect if it was a normal closure (code 1000)
-          // or if user manually disconnected
           if (autoReconnectCheck.checked && event.code !== 1000 && event.code !== 1001) {
             logMessage('info', 'Auto-reconnecting in 3 seconds...');
             reconnectTimer = setTimeout(connect, 3000);
           }
         };
 
-        ws.onerror = (error) => {
+        ws.onerror = (e) => {
           updateStatus('disconnected', 'Error');
-          logMessage('error', 'WebSocket error occurred', error);
-          // Prevent page refresh on error
-          event?.preventDefault?.();
+          logMessage('error', 'WebSocket error occurred', e);
+          // important: prevent default error (page reload)
+          if (e && typeof e.preventDefault === "function") e.preventDefault();
         };
 
         ws.onmessage = (event) => {
+          let data;
+          let raw = event.data;
           try {
-            const data = JSON.parse(event.data);
-            logMessage('received', 'Message received', data);
+            data = JSON.parse(raw);
           } catch (e) {
-            logMessage('received', 'Non-JSON message received', event.data);
+            logMessage('received', 'Non-JSON message received', raw);
+            return;
+          }
+
+          /*
+            Support new output shape:
+            - For type Upload.list, expect a 'list' field of array of upload objects.
+            - Old style: items/instances/objects.
+            - Show all items in the log summary for Upload.list type.
+          */
+
+          let showType = data.type || '(no type)';
+          let lowerType = typeof showType === "string" ? showType.toLowerCase() : "";
+
+          // If message is an error
+          if (lowerType === "error") {
+            logMessage('error', `[Error] ${(data.message || '')}`, data);
+          } else if (lowerType === "heartbeat") {
+            logMessage('received', `[Heartbeat]`, data);
+          }
+          // Upload Created/Updated/Deleted Events
+          else if (
+            lowerType === "upload.created" ||
+            lowerType === "upload.updated" ||
+            lowerType === "upload.deleted"
+          ) {
+            let summary = `${showType}`;
+            if (data.instance) summary += `\nInstance: ${JSON.stringify(data.instance, null, 2)}`;
+            if (data.object) summary += `\nObject: ${JSON.stringify(data.object, null, 2)}`;
+            logMessage('received', summary, data);
+          }
+          // List responses
+          else if (
+            lowerType === "upload.list" ||
+            lowerType === "list"
+          ) {
+            // Prefer 'list' field if present (new response shape)
+            let items = Array.isArray(data.list) ? data.list :
+              (Array.isArray(data.items) ? data.items :
+              (Array.isArray(data.instances) ? data.instances :
+              (Array.isArray(data.objects) ? data.objects : [])));
+            let count = items.length;
+            let summary = `List: ${count} item(s)`;
+            if (count > 0) {
+              summary += "\nFirst: " + JSON.stringify(items[0], null, 2);
+            }
+            // If there are a lot, also list all IDs
+            if (count > 1) {
+              summary += "\nIDs:\n" + items.map(i => i.id).join("\n");
+            }
+            logMessage('received', summary, data);
+          }
+          // Detail responses
+          else if (
+            lowerType === "upload.detail" ||
+            lowerType === "detail"
+          ) {
+            let summary = "Detail:";
+            let instance = data.instance || data.object || data.detail;
+            if (instance) summary += "\n" + JSON.stringify(instance, null, 2);
+            logMessage('received', summary, data);
+          }
+          else {
+            logMessage('received', `Message received: ${showType}`, data);
           }
         };
       } catch (error) {
@@ -746,7 +427,6 @@
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
-      
       if (ws) {
         ws.close(1000, 'User disconnected');
         ws = null;
@@ -758,27 +438,23 @@
         logMessage('error', 'WebSocket is not connected');
         return;
       }
-
       const type = commandTypeSelect.value;
       const instanceId = commandInstanceIdInput.value.trim();
       const dataStr = commandDataTextarea.value.trim();
 
       const message = { type };
 
-      if (instanceId && type !== 'list') {
+      // Instance id as payload
+      if (instanceId) {
         message.instance_id = instanceId;
       }
 
       if (['create', 'update'].includes(type)) {
         let data = {};
-        
-        // If file is uploaded, use base64
         if (type === 'create' && imageFileInput.dataset.base64) {
           data.image_base64 = imageFileInput.dataset.base64;
           logMessage('info', `Using uploaded file: ${imageFileInput.files[0]?.name || 'unknown'}`);
         }
-        
-        // Merge with JSON data if provided
         if (dataStr) {
           try {
             const jsonData = JSON.parse(dataStr);
@@ -788,12 +464,10 @@
             return;
           }
         }
-        
         message.data = data;
       }
 
       try {
-        // Don't log the full base64 data (too large)
         const logMessage_data = { ...message };
         if (logMessage_data.data && logMessage_data.data.image_base64) {
           logMessage_data.data = {
@@ -802,7 +476,6 @@
           };
         }
         logMessage('sent', `Command: ${type}`, logMessage_data);
-        
         ws.send(JSON.stringify(message));
       } catch (error) {
         logMessage('error', 'Failed to send message', error);
@@ -811,11 +484,9 @@
 
     // Preset functions
     function loadPreset(preset) {
-      // Clear file input when loading presets
       imageFileInput.value = '';
       imageFileInput.dataset.base64 = '';
       fileInfo.textContent = '';
-      
       switch (preset) {
         case 'subscribe':
           commandTypeSelect.value = 'subscribe';
@@ -827,7 +498,7 @@
           break;
         case 'create':
           commandTypeSelect.value = 'create';
-          commandDataTextarea.value = ''; // Let user choose: file upload or JSON
+          commandDataTextarea.value = '';
           commandTypeSelect.dispatchEvent(new Event('change'));
           break;
         case 'update':
@@ -841,11 +512,10 @@
       }
     }
 
-    // Event listeners
     connectBtn.addEventListener('click', connect);
     disconnectBtn.addEventListener('click', disconnect);
     sendBtn.addEventListener('click', sendCommand);
-    
+
     clearLogBtn.addEventListener('click', () => {
       messageLog.innerHTML = '';
       messageHistory = [];
@@ -868,14 +538,20 @@
       URL.revokeObjectURL(url);
     });
 
-    // Allow Enter key to send command
     commandDataTextarea.addEventListener('keydown', (e) => {
       if (e.ctrlKey && e.key === 'Enter') {
+        // Never let ctrl+enter cause form submit/page reload
+        e.preventDefault();
         sendCommand();
       }
     });
 
-    // Initialize
+    // Prevent form submit anywhere (in case the page is inside a form for any reason)
+    document.addEventListener('submit', function(e) {
+      e.preventDefault();
+      return false;
+    }, true);
+
     updateStats();
   </script>
 </body>
