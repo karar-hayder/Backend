@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.contrib.postgres.fields import JSONField
 
 
 class Upload(models.Model):
@@ -30,9 +31,7 @@ class Upload(models.Model):
         (OCR_MODE_ACCURATE, "High Accuracy"),
     ]
 
-    id = models.UUIDField(
-        primary_key=True, default=uuid.uuid4, editable=False, db_index=True
-    )
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_index=True)
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -74,6 +73,15 @@ class Upload(models.Model):
         help_text="Status of the image upload and processing",
         db_index=True,
     )
+    # Ollama/LLM-compatible history of user questions & answers about this upload.
+    # Each item: {role: "user"|"assistant", content: "...", (optional keys...)}
+    # followup_qa = models.JSONField(
+    #     blank=True,
+    #     null=True,
+    #     default=list,
+    #     help_text="List of follow-up Q&A in Ollama/chat format: [{role, content, ...}, ...]",
+    # )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
