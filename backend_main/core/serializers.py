@@ -23,6 +23,7 @@ class UploadSerializer(serializers.ModelSerializer):
             "raw_text",
             "status",
             "processed_text",
+            "followup_qa",
             "created_at",
             "updated_at",
             "image_path",
