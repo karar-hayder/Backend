@@ -5,6 +5,11 @@ from celery import shared_task
 from channels.layers import get_channel_layer
 from django.conf import settings
 
+from core.cache import (
+    cache_upload_payload,
+    clear_upload_cache,
+)
+
 logger = logging.getLogger("core.tasks.ocr")
 
 
@@ -30,12 +35,15 @@ def process_upload_ocr(upload_id):
         )
     except Upload.DoesNotExist:
         logger.error(f"Upload with id={upload_id} does not exist, aborting OCR task.")
+        clear_upload_cache(upload_id=upload_id)
         return
 
     # Set status to processing and notify websocket
     upload.status = Upload.STATUS_PROCESSING
     upload.save(update_fields=["status", "updated_at"])
     logger.info(f"Set Upload {upload_id} status to PROCESSING")
+    # Cache status for upload (for real-time & long-running status lookup)
+    cache_upload_payload(upload_id, {"status": Upload.STATUS_PROCESSING})
 
     # Get channel layer - handle case where it might not be available
     try:
@@ -144,6 +152,15 @@ def process_upload_ocr(upload_id):
                                 "type": "Upload.status",
                             }
                         )
+                        # Cache partial streamed text to allow polling for progress
+                        cache_upload_payload(
+                            upload_id,
+                            {
+                                "status": Upload.STATUS_PROCESSING,
+                                "streamed_text": streamed_content,
+                                "extracted_markdown": extracted_markdown,
+                            },
+                        )
 
                 logger.info(
                     f"OCR stream complete for upload {upload_id}. Final stream length={len(streamed_content)}"
@@ -156,7 +173,9 @@ def process_upload_ocr(upload_id):
                 upload.save(
                     update_fields=["raw_text", "processed_text", "status", "updated_at"]
                 )
-                logger.info(f"Upload {upload_id} marked as PROCESSED, text saved. Markdown length={len(markdown_text)}")
+                logger.info(
+                    f"Upload {upload_id} marked as PROCESSED, text saved. Markdown length={len(markdown_text)}"
+                )
                 # Send final result (status: processed) via websocket
                 send_ws_message(
                     {
@@ -166,6 +185,15 @@ def process_upload_ocr(upload_id):
                         "processed_text": markdown_text,
                         "type": "Upload.status",
                     }
+                )
+                # Write final state to cache, too
+                cache_upload_payload(
+                    upload_id,
+                    {
+                        "status": Upload.STATUS_PROCESSED,
+                        "raw_text": streamed_content,
+                        "processed_text": markdown_text,
+                    },
                 )
             else:
                 logger.error(
@@ -181,6 +209,8 @@ def process_upload_ocr(upload_id):
                         "error": f"AI endpoint error (HTTP {response.status_code})",
                     }
                 )
+                # Remove any stale result from cache now that error happened
+                clear_upload_cache(upload_id=upload_id)
     except Exception as e:
         logger.exception(f"OCR task failed for upload {upload_id}: {e}")
         upload.status = Upload.STATUS_ERROR
@@ -193,6 +223,7 @@ def process_upload_ocr(upload_id):
                 "error": str(e),
             }
         )
+        clear_upload_cache(upload_id=upload_id)
 
 
 @shared_task(queue="qna")
@@ -226,6 +257,7 @@ def process_question(upload_id):
         upload = Upload.objects.get(id=upload_id)
     except Upload.DoesNotExist:
         logger.error(f"Upload with id={upload_id} does not exist, aborting QnA task.")
+        clear_upload_cache(upload_id=upload_id)
         return
 
     # Get the QA history as a list with user & assistant turns
@@ -358,6 +390,16 @@ def process_question(upload_id):
                     logger.error(
                         f"Failed to send answer through websocket for upload {upload_id}: {ws_exc}"
                     )
+                # Cache the new state for fast QnA lookup for this upload
+                cache_upload_payload(
+                    upload_id,
+                    {
+                        "status": "answered",
+                        "followup_qa": qa_history,
+                        "last_q": user_prompt,
+                        "answer": answer,
+                    },
+                )
 
             else:
                 logger.error(
@@ -375,6 +417,8 @@ def process_question(upload_id):
                     send_ws_message(ws_error_payload)
                 except Exception:
                     pass
+                # Clear any old QnA cache if error happened
+                clear_upload_cache(upload_id=upload_id)
     except Exception as e:
         logger.exception(f"Failed to call /api/convo/ for upload {upload_id}: {e}")
         # Optionally, notify websocket of error:
@@ -390,3 +434,4 @@ def process_question(upload_id):
             )
         except Exception:
             pass
+        clear_upload_cache(upload_id=upload_id)
