@@ -1,5 +1,6 @@
 import re
 
+
 def extract_markdown_text(ai_output: str) -> str:
     """
     Extracts and returns only the text surrounded by '```markdown ... ```' from a string.
@@ -15,4 +16,3 @@ def extract_markdown_text(ai_output: str) -> str:
     if match:
         return match.group(1).strip()
     return ""
-

@@ -3,12 +3,8 @@ import logging
 from asgiref.sync import async_to_sync
 from celery import shared_task
 from channels.layers import get_channel_layer
+from core.cache import cache_upload_payload, clear_upload_cache
 from django.conf import settings
-
-from core.cache import (
-    cache_upload_payload,
-    clear_upload_cache,
-)
 
 logger = logging.getLogger("core.tasks.ocr")
 
@@ -201,6 +197,7 @@ def process_upload_ocr(upload_id):
                 try:
                     from core.cache import get_cached_upload_payload
                     from core.serializers import UploadSerializer
+
                     # Full payload for broadcasting (same as consumers)
                     payload = UploadSerializer(instance=upload).data
                     # Import constants as in consumers
@@ -223,11 +220,15 @@ def process_upload_ocr(upload_id):
                                         "instance": payload,
                                     },
                                 )
-                                logger.debug(f"Final OCR WS status sent to group {grp}: {payload}")
+                                logger.debug(
+                                    f"Final OCR WS status sent to group {grp}: {payload}"
+                                )
                             except Exception as e:
                                 logger.warning(f"Failed broadcast to group {grp}: {e}")
                 except Exception as bcast_e:
-                    logger.warning(f"Could not broadcast OCR completion (model_update) to all groups: {bcast_e}")
+                    logger.warning(
+                        f"Could not broadcast OCR completion (model_update) to all groups: {bcast_e}"
+                    )
 
             else:
                 logger.error(
@@ -277,15 +278,27 @@ def process_question(upload_id):
 
     logger = logging.getLogger("core.tasks.qna")
 
-    # Import send_ws_message from consumers for WebSocket broadcast.
-    try:
-        from core.consumers import send_ws_message
-    except ImportError:
+    # Get objects for group broadcasting, etc.
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from core.cache import cache_upload_payload, clear_upload_cache
 
-        def send_ws_message(msg):
-            logger.error(
-                "send_ws_message could not be imported for QnA WebSocket broadcast."
+    # Only import the serializer and group logic at send-time to avoid overhead.
+    from core.serializers import UploadSerializer
+
+    # Setup channel layer
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            logger.warning(
+                f"Channel layer is None for upload {upload_id}, WebSocket updates will be disabled"
             )
+            channel_layer = None
+    except Exception as e:
+        logger.warning(
+            f"Could not get channel layer for upload {upload_id}: {e}. WebSocket updates disabled."
+        )
+        channel_layer = None
 
     try:
         upload = Upload.objects.get(id=upload_id)
@@ -293,6 +306,53 @@ def process_question(upload_id):
         logger.error(f"Upload with id={upload_id} does not exist, aborting QnA task.")
         clear_upload_cache(upload_id=upload_id)
         return
+
+    # Only use a single group per user if owner is set
+    group_name = None
+    if hasattr(upload, "owner") and upload.owner_id:
+        group_name = f"Upload_user_{upload.owner_id}"
+    else:
+        logger.warning(
+            f"Upload {upload_id} has no owner - cannot send websocket message to user group"
+        )
+
+    # ----- Inner helper to send websocket -----
+    def send_ws_message(content):
+        if channel_layer is None or not group_name:
+            logger.debug(
+                "Skipping WebSocket message - channel layer or user group unavailable"
+            )
+            return
+        try:
+            async_to_sync(channel_layer.group_send)(
+                group_name,
+                {
+                    "type": "model_update",
+                    "event": "Upload.status",
+                    "instance": content,
+                },
+            )
+            logger.debug(f"WebSocket group_send to {group_name}: {content}")
+        except Exception as ws_e:
+            error_msg = str(ws_e)
+            error_type = type(ws_e).__name__
+            is_redis_error = (
+                "redis" in error_msg.lower()
+                or "6379" in error_msg
+                or "connection" in error_msg.lower()
+                or "ConnectionError" in error_type
+                or "OSError" in error_type
+                or "duplicate name" in error_msg.lower()
+            )
+            if is_redis_error:
+                logger.warning(
+                    f"Redis/channel layer unavailable for WebSocket message (upload {upload_id} QnA): {ws_e}."
+                )
+            else:
+                logger.error(
+                    f"Failed to send WebSocket QnA message for upload {upload_id}: {ws_e}",
+                    exc_info=True,
+                )
 
     # Get the QA history as a list with user & assistant turns
     qa_history = upload.followup_qa if upload.followup_qa is not None else []
@@ -371,6 +431,8 @@ def process_question(upload_id):
         # Only send one image as "image"
         files["image"] = ("image.jpg", base64.b64decode(images[0]))
 
+    answer = None
+    error = None
     try:
         # Use stream to get the answer just like the Python client expects streaming markdown
         with requests.post(
@@ -395,77 +457,83 @@ def process_question(upload_id):
                     logger.warning(
                         f"No answer (empty streaming response) from /api/convo/ for upload {upload_id}."
                     )
-                    return
-                # Insert the answer as an assistant message
-                qa_history.insert(
-                    last_user_index + 1, {"role": "assistant", "content": answer}
-                )
-                upload.followup_qa = qa_history
-                upload.save(update_fields=["followup_qa", "updated_at"])
-                logger.info(
-                    f"Appended assistant answer to Upload {upload_id} followup_qa."
-                )
-
-                # ---- Send answer through websocket ----
-                ws_payload = {
-                    "id": str(upload.id),
-                    "instance_id": str(upload.id),
-                    "question": user_prompt,
-                    "answer": answer,
-                    "status": "answered",
-                    "type": "Upload.status",
-                }
-                try:
-                    send_ws_message(ws_payload)
+                    error = "No streamed answer"
+                else:
+                    # Insert the answer as an assistant message
+                    qa_history.insert(
+                        last_user_index + 1, {"role": "assistant", "content": answer}
+                    )
+                    upload.followup_qa = qa_history
+                    upload.save(update_fields=["followup_qa", "updated_at"])
                     logger.info(
-                        f"Sent answer through websocket for upload {upload_id}."
+                        f"Appended assistant answer to Upload {upload_id} followup_qa."
                     )
-                except Exception as ws_exc:
-                    logger.error(
-                        f"Failed to send answer through websocket for upload {upload_id}: {ws_exc}"
+                    # Cache the new state for fast QnA lookup for this upload
+                    cache_upload_payload(
+                        upload_id,
+                        {
+                            "status": "answered",
+                            "followup_qa": qa_history,
+                            "last_q": user_prompt,
+                            "answer": answer,
+                        },
                     )
-                # Cache the new state for fast QnA lookup for this upload
-                cache_upload_payload(
-                    upload_id,
-                    {
-                        "status": "answered",
-                        "followup_qa": qa_history,
-                        "last_q": user_prompt,
-                        "answer": answer,
-                    },
-                )
-
             else:
                 logger.error(
                     f"QnA endpoint returned non-200 ({response.status_code}) for upload {upload_id}: {getattr(response, 'text', None)}"
                 )
-                # Optionally, notify websocket of error:
-                ws_error_payload = {
-                    "id": str(upload.id),
-                    "instance_id": str(upload.id),
-                    "status": "error",
-                    "type": "Upload.status",
-                    "error": f"AI QnA endpoint error (HTTP {response.status_code})",
-                }
-                try:
-                    send_ws_message(ws_error_payload)
-                except Exception:
-                    pass
+                error = f"AI QnA endpoint error (HTTP {response.status_code})"
                 # Clear any old QnA cache if error happened
                 clear_upload_cache(upload_id=upload_id)
     except Exception as e:
         logger.exception(f"Failed to call /api/convo/ for upload {upload_id}: {e}")
-        # Optionally, notify websocket of error:
-        try:
-            send_ws_message(
-                {
-                    "id": str(upload.id),
-                    "instance_id": str(upload.id),
-                    "status": "error",
-                    "type": "Upload.status",
-                    "error": str(e),
-                }
-            )
-        except Exception:
-            pass
+        error = str(e)
         clear_upload_cache(upload_id=upload_id)
+
+    # Always send final ws message at the end, to all groups just like process_upload_ocr
+    # Full payload for broadcasting (same as consumers)
+    payload = UploadSerializer(instance=upload).data
+    MODEL_NAME = "Upload"
+    EVENT_UPDATED = f"{MODEL_NAME}.updated"
+    all_group = f"{MODEL_NAME}_all"
+    user_group = group_name  # May be None
+
+    ws_status_payload = {
+        "id": str(upload.id),
+        "instance_id": str(upload.id),
+        "status": "answered" if answer and not error else "error",
+        "type": "Upload.status",
+    }
+    if error:
+        ws_status_payload["error"] = error
+    if user_prompt:
+        ws_status_payload["question"] = user_prompt
+    if answer:
+        ws_status_payload["answer"] = answer
+
+    # Send to all websocket groups (all + per-user group)
+    for grp in {all_group, user_group}:
+        if grp:
+            try:
+                async_to_sync(channel_layer.group_send)(
+                    grp,
+                    {
+                        "type": "model_update",
+                        "event": EVENT_UPDATED,
+                        "instance": payload,
+                    },
+                )
+                logger.debug(f"Final QnA WS status sent to group {grp}: {payload}")
+            except Exception as bcast_e:
+                logger.warning(f"Failed broadcast to group {grp}: {bcast_e}")
+
+    # Always send the per-user message for this upload
+    try:
+        send_ws_message(ws_status_payload)
+        logger.info(
+            f"Sent QnA status through websocket for upload {upload_id}: {ws_status_payload}"
+        )
+    except Exception as ws_exc:
+        logger.error(
+            f"Failed to send QnA status through websocket for upload {upload_id}: {ws_exc}"
+        )

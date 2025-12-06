@@ -26,6 +26,7 @@ def _cache_previous_upload_state(sender, instance, **kwargs):
         "owner_id": str(previous.owner_id) if previous.owner_id else None,
     }
 
+
 @receiver(post_save, sender=Upload)
 def refresh_upload_cache(sender, instance, **kwargs):
     """
@@ -82,21 +83,7 @@ def refresh_upload_cache(sender, instance, **kwargs):
                 f"Failed to trigger OCR task for upload {instance.id}: {e}",
                 exc_info=True,
             )
-    # Also clear user-level queryset cache (list of Uploads per user, e.g. for UploadImageView)
-    # Matches: cache_key = f"upload_image_queryset:{user_id}"
-    try:
-        from django.core.cache import cache
-        user_id = str(instance.owner_id) if getattr(instance, "owner_id", None) else None
-        if user_id:
-            cache_key = f"upload_image_queryset:{user_id}"
-            cache.delete(cache_key)
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(
-            f"Failed to clear user queryset cache for upload {getattr(instance, 'id', None)} owner {user_id}: {e}",
-            exc_info=True,
-        )
+
 
 @receiver(post_delete, sender=Upload)
 def remove_upload_cache(sender, instance, **kwargs):
@@ -115,15 +102,18 @@ def remove_upload_cache(sender, instance, **kwargs):
 
     try:
         from django.core.cache import cache
-        user_id = str(instance.owner_id) if getattr(instance, "owner_id", None) else None
+
+        user_id = (
+            str(instance.owner_id) if getattr(instance, "owner_id", None) else None
+        )
         if user_id:
             cache_key = f"upload_image_queryset:{user_id}"
             cache.delete(cache_key)
     except Exception as e:
         import logging
+
         logger = logging.getLogger(__name__)
         logger.error(
             f"Failed to clear user queryset cache for upload {getattr(instance, 'id', None)} owner {user_id}: {e}",
             exc_info=True,
         )
-

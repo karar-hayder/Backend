@@ -4,7 +4,7 @@ import logging
 # Dedicated logger for consumers, logs to file in this directory
 import os
 from logging.handlers import RotatingFileHandler
-from typing import Any, Dict, Optional
+from typing import Any, Coroutine, Dict, Optional
 
 import jwt
 from asgiref.sync import async_to_sync, sync_to_async
@@ -408,7 +408,7 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
     async def _handle_question(self, content):
         instance_id = content.get("instance_id", None)
         question = content.get("question", None)
-        result = self.question_upload(instance_id, question)
+        result = await self.question_upload(instance_id, question)
         await self.send_json(result)
 
     @sync_to_async
@@ -463,10 +463,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
         try:
             # Filter by owner if user is provided, and skip soft deleted
             if user and hasattr(user, "id"):
-                queryset = (
-                    Upload.objects.filter(owner=user, is_deleted=False)
-                    .order_by("-created_at")[:MAX_LIST_RESULTS]
-                )
+                queryset = Upload.objects.filter(owner=user, is_deleted=False).order_by(
+                    "-created_at"
+                )[:MAX_LIST_RESULTS]
             else:
                 # If no user, return empty list
                 return []
