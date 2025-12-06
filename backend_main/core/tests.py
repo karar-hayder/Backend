@@ -12,6 +12,7 @@ from rest_framework import status
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 from userss.models import CustomUser
 
+from .cache import cache_upload_payload, get_cached_upload_payload
 from .models import Upload
 from .rates import DemoUserUploadRateThrottle, IPRateThrottle
 from .serializers import UploadSerializer
@@ -373,6 +374,37 @@ class UploadViewTests(TestCase):
         self.assertIsNotNone(cache_by_hash)
         self.assertEqual(cache_by_id["processed_text"], "processed")
         self.assertEqual(cache_by_hash["processed_text"], "processed")
+
+    def test_cache_invalidated_when_upload_hash_changes(self):
+        cache.clear()
+        owner_id = str(self.user.id)
+        upload = Upload.objects.create(
+            owner=self.user,
+            image_path=self.image_path1,
+            image_hash="hash-original",
+            raw_text="body",
+        )
+        cache_upload_payload(
+            upload.id,
+            {"id": str(upload.id), "processed_text": "cached"},
+            image_hash="hash-original",
+            owner_id=owner_id,
+        )
+        self.assertIsNotNone(
+            get_cached_upload_payload(
+                upload_id=None, image_hash="hash-original", owner_id=owner_id
+            )
+        )
+
+        upload.image_hash = "hash-updated"
+        upload.save()
+
+        # Old hash cache should be removed even though the upload still exists.
+        self.assertIsNone(
+            get_cached_upload_payload(
+                upload_id=None, image_hash="hash-original", owner_id=owner_id
+            )
+        )
 
     def test_upload_detail_uses_cache_on_second_retrieve(self):
         # Prepare file and Upload in DB as usual

@@ -1,9 +1,30 @@
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
 from .cache import cache_upload_payload, clear_upload_cache
 from .models import Upload
 from .serializers import UploadSerializer
+
+
+@receiver(pre_save, sender=Upload)
+def _cache_previous_upload_state(sender, instance, **kwargs):
+    """
+    Keep track of the Upload row's previous hash/owner so we can flush stale cache keys.
+    """
+    if not instance.pk:
+        instance._previous_upload_cache_state = None
+        return
+
+    try:
+        previous = sender.objects.only("image_hash", "owner_id").get(pk=instance.pk)
+    except Upload.DoesNotExist:
+        instance._previous_upload_cache_state = None
+        return
+
+    instance._previous_upload_cache_state = {
+        "image_hash": previous.image_hash,
+        "owner_id": str(previous.owner_id) if previous.owner_id else None,
+    }
 
 @receiver(post_save, sender=Upload)
 def refresh_upload_cache(sender, instance, **kwargs):
@@ -14,6 +35,11 @@ def refresh_upload_cache(sender, instance, **kwargs):
     """
     # Construct all current/legacy/extra cache keys related to this Upload.
     owner_id = str(instance.owner_id) if getattr(instance, "owner_id", None) else None
+    prev_state = getattr(instance, "_previous_upload_cache_state", None)
+    prev_image_hash = prev_owner_id = None
+    if prev_state:
+        prev_image_hash = prev_state.get("image_hash")
+        prev_owner_id = prev_state.get("owner_id")
 
     # Pre-clear all possible cache variants of this upload using all known IDs and hashes
     clear_upload_cache(
@@ -35,6 +61,12 @@ def refresh_upload_cache(sender, instance, **kwargs):
         # Optionally store under extra cache keys for migration or multi-index
         extra_keys=None,
     )
+
+    # Also clear any legacy cache entries left behind for the previous hash/owner combo.
+    if prev_image_hash and (
+        prev_image_hash != instance.image_hash or prev_owner_id != owner_id
+    ):
+        clear_upload_cache(image_hash=prev_image_hash, owner_id=prev_owner_id)
 
     # For new uploads only, trigger OCR processing
     if kwargs.get("created", False):
