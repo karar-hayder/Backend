@@ -422,7 +422,8 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
             return {"type": EVENT_UPDATED, "error": "question_required"}
 
         try:
-            instance: Upload = Upload.objects.get(id=instance_id)
+            # Do not allow question on soft-deleted upload
+            instance: Upload = Upload.objects.get(id=instance_id, is_deleted=False)
         except Upload.DoesNotExist:
             return {"type": EVENT_UPDATED, "error": "not_found"}
 
@@ -460,11 +461,12 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
             List of serialized upload data
         """
         try:
-            # Filter by owner if user is provided
+            # Filter by owner if user is provided, and skip soft deleted
             if user and hasattr(user, "id"):
-                queryset = Upload.objects.filter(owner=user).order_by("-created_at")[
-                    :MAX_LIST_RESULTS
-                ]
+                queryset = (
+                    Upload.objects.filter(owner=user, is_deleted=False)
+                    .order_by("-created_at")[:MAX_LIST_RESULTS]
+                )
             else:
                 # If no user, return empty list
                 return []
@@ -509,7 +511,8 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
             }
 
         try:
-            instance = Upload.objects.get(id=instance_id)
+            # Don't return soft deleted uploads
+            instance = Upload.objects.get(id=instance_id, is_deleted=False)
             data = get_cached_upload_payload(instance_id)
             if not data:
                 data = UploadSerializer(instance).data
@@ -904,8 +907,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
             instance = Upload.objects.get(id=instance_id)
         except Upload.DoesNotExist:
             return {"type": EVENT_DELETED, "error": "not_found"}
-
-        instance.delete()
+        # Use soft-delete by setting is_deleted=True and saving the instance instead of hard-delete
+        instance.is_deleted = True
+        instance.save(update_fields=["is_deleted", "updated_at"])
         return {"type": EVENT_DELETED, "instance_id": instance_id}
 
     async def model_update(self, event: Dict[str, Any]):
