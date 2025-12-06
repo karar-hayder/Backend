@@ -386,23 +386,42 @@ class UploadImageView(generics.GenericAPIView):
     lookup_field = "id"
 
     def get_queryset(self):
-        return Upload.objects.filter(owner=self.request.user)
+        # Use only() to avoid fetching unnecessary fields, increasing efficiency
+        return Upload.objects.filter(owner=self.request.user).only("id", "image_path")
 
     def get(self, request, *args, **kwargs):
-        upload = self.get_object()
+        try:
+            upload = self.get_object()
+        except Http404:
+            return Response(
+                {"detail": "Upload not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         image_path = upload.image_path
 
+        # Efficient existence check before attempting heavy I/O
         if not image_path or not default_storage.exists(image_path):
             return Response(
-                {"detail": "Image file not found."}, status=status.HTTP_404_NOT_FOUND
+                {"detail": "Image file not found."},
+                status=status.HTTP_404_NOT_FOUND,
             )
-        content_type, _ = mimetypes.guess_type(image_path)
-        response = FileResponse(
-            open(image_path, "rb"),
-            content_type=content_type or "application/octet-stream",
-        )
-        response["Content-Length"] = os.path.getsize(image_path)
-        response["Content-Disposition"] = (
-            f'inline; filename="{os.path.basename(image_path)}"'
-        )
-        return response
+
+        try:
+            file_size = os.path.getsize(image_path)
+            content_type, _ = mimetypes.guess_type(image_path)
+            with open(image_path, "rb") as file_handle:
+                response = FileResponse(
+                    file_handle,
+                    content_type=content_type or "application/octet-stream",
+                )
+                response["Content-Length"] = file_size
+                response["Content-Disposition"] = (
+                    f'inline; filename="{os.path.basename(image_path)}"'
+                )
+                return response
+        except (OSError, IOError):
+            return Response(
+                {"detail": "Unable to open or read image file."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
