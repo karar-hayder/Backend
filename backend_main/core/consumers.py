@@ -393,20 +393,20 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
 
     async def _handle_update(self, content: Dict[str, Any]):
         """Handle update command."""
-        instance_id = content.get("instance_id", self.instance_id)
+        instance_id = content.get("instance_id", None)
         result = await self.update_instance(instance_id, content.get("data", {}))
         await self.send_json(result)
         await self.model_broadcast("updated", result)
 
     async def _handle_delete(self, content: Dict[str, Any]):
         """Handle delete command."""
-        instance_id = content.get("instance_id", self.instance_id)
+        instance_id = content.get("instance_id", None)
         result = await self.delete_instance(instance_id)
         await self.send_json(result)
         await self.model_broadcast("deleted", result)
 
     async def _handle_question(self, content):
-        instance_id = content.get("instance_id", self.instance_id)
+        instance_id = content.get("instance_id", None)
         question = content.get("question", None)
         result = self.question_upload(instance_id, question)
         await self.send_json(result)
