@@ -186,3 +186,200 @@ def process_upload_ocr(upload_id):
                 "error": str(e),
             }
         )
+
+
+@shared_task(queue="qna")
+def process_question(upload_id):
+    """
+    Process a user question related to an Upload by sending the appropriate content/history/image
+    to a new Ollama/LLava chat endpoint, then append the answer to the Upload's followup_qa list.
+    Also sends the generated answer through the websocket, per Upload.status event.
+    """
+    import base64
+    import json
+
+    import requests
+    from core.models import Upload
+    from django.conf import settings
+    from django.core.files.storage import default_storage
+
+    logger = logging.getLogger("core.tasks.qna")
+
+    # Import send_ws_message from consumers for WebSocket broadcast.
+    try:
+        from core.consumers import send_ws_message
+    except ImportError:
+
+        def send_ws_message(msg):
+            logger.error(
+                "send_ws_message could not be imported for QnA WebSocket broadcast."
+            )
+
+    try:
+        upload = Upload.objects.get(id=upload_id)
+    except Upload.DoesNotExist:
+        logger.error(f"Upload with id={upload_id} does not exist, aborting QnA task.")
+        return
+
+    # Get the QA history as a list with user & assistant turns
+    qa_history = upload.followup_qa if upload.followup_qa is not None else []
+    # Only act if there is an unanswered user question.
+    last_user_index = None
+    for i in range(len(qa_history) - 1, -1, -1):
+        entry = qa_history[i]
+        if entry.get("role") == "user":
+            # If there is not an immediately following "assistant" answer for this question
+            if i + 1 >= len(qa_history) or qa_history[i + 1].get("role") != "assistant":
+                last_user_index = i
+                break
+    if last_user_index is None:
+        logger.info(
+            f"All user questions for upload {upload_id} are already answered or no user question found."
+        )
+        return
+
+    user_prompt = qa_history[last_user_index].get("content")
+    if not user_prompt:
+        logger.warning(
+            f"User question at index {last_user_index} has no content for upload {upload_id}."
+        )
+        return
+
+    # Try to get chat history up to this question, as plain text exchange for compatibility
+    def format_history_for_prompt(history, up_to_index):
+        # Only up to the last user prompt (exclusive)
+        formatted = []
+        for i in range(0, up_to_index):
+            role = history[i].get("role", "")
+            content = history[i].get("content", "")
+            if role and content:
+                formatted.append(f"{role.capitalize()}: {content}")
+        return "\n".join(formatted) if formatted else None
+
+    # Compose extracted OCR content if available
+    extracted_content = upload.raw_text if upload.raw_text else None
+
+    # Prepare image as base64 if present
+    image_field_path = upload.image_path
+    images = []
+    try:
+        image_bytes = None
+        if default_storage.exists(image_field_path):
+            with default_storage.open(image_field_path, "rb") as f:
+                image_bytes = f.read()
+        else:
+            with open(image_field_path, "rb") as f:
+                image_bytes = f.read()
+        if image_bytes:
+            images.append(base64.b64encode(image_bytes).decode("utf-8"))
+    except Exception as e:
+        logger.error(
+            f"Failed to read image file {image_field_path} for upload {upload_id}: {e}"
+        )
+        # Continue without image.
+
+    # Compose chat_history to text per API spec ("history" field)
+    chat_history = format_history_for_prompt(qa_history, last_user_index)
+    # Compose POST for new API
+    ai_host = getattr(settings, "AI_HOST", "http://localhost:5000")
+    api_url = ai_host.rstrip("/") + "/api/convo/"
+
+    form_data = {
+        "prompt": user_prompt,
+    }
+    if extracted_content:
+        form_data["content"] = extracted_content
+    if chat_history:
+        form_data["history"] = chat_history
+
+    # Compose files part if image available
+    files = {}
+    if images:
+        # Only send one image as "image"
+        files["image"] = ("image.jpg", base64.b64decode(images[0]))
+
+    try:
+        # Use stream to get the answer just like the Python client expects streaming markdown
+        with requests.post(
+            api_url,
+            data=form_data,
+            files=files if files else None,
+            timeout=120,
+            stream=True,
+        ) as response:
+            if response.status_code == 200:
+                # Gather the streamed answer
+                answer_parts = []
+                for line in response.iter_lines():
+                    if line:
+                        try:
+                            decoded_line = line.decode()
+                        except Exception:
+                            decoded_line = line
+                        answer_parts.append(decoded_line)
+                answer = "".join(answer_parts).strip()
+                if not answer:
+                    logger.warning(
+                        f"No answer (empty streaming response) from /api/convo/ for upload {upload_id}."
+                    )
+                    return
+                # Insert the answer as an assistant message
+                qa_history.insert(
+                    last_user_index + 1, {"role": "assistant", "content": answer}
+                )
+                upload.followup_qa = qa_history
+                upload.save(update_fields=["followup_qa", "updated_at"])
+                logger.info(
+                    f"Appended assistant answer to Upload {upload_id} followup_qa."
+                )
+
+                # ---- Send answer through websocket ----
+                ws_payload = {
+                    "id": str(upload.id),
+                    "instance_id": str(upload.id),
+                    "question": user_prompt,
+                    "answer": answer,
+                    "status": "answered",
+                    "type": "Upload.status",
+                }
+                try:
+                    send_ws_message(ws_payload)
+                    logger.info(
+                        f"Sent answer through websocket for upload {upload_id}."
+                    )
+                except Exception as ws_exc:
+                    logger.error(
+                        f"Failed to send answer through websocket for upload {upload_id}: {ws_exc}"
+                    )
+
+            else:
+                logger.error(
+                    f"QnA endpoint returned non-200 ({response.status_code}) for upload {upload_id}: {getattr(response, 'text', None)}"
+                )
+                # Optionally, notify websocket of error:
+                ws_error_payload = {
+                    "id": str(upload.id),
+                    "instance_id": str(upload.id),
+                    "status": "error",
+                    "type": "Upload.status",
+                    "error": f"AI QnA endpoint error (HTTP {response.status_code})",
+                }
+                try:
+                    send_ws_message(ws_error_payload)
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.exception(f"Failed to call /api/convo/ for upload {upload_id}: {e}")
+        # Optionally, notify websocket of error:
+        try:
+            send_ws_message(
+                {
+                    "id": str(upload.id),
+                    "instance_id": str(upload.id),
+                    "status": "error",
+                    "type": "Upload.status",
+                    "error": str(e),
+                }
+            )
+        except Exception:
+            pass

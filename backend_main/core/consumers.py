@@ -24,7 +24,9 @@ logger.setLevel(logging.INFO)
 
 _logfile = os.path.join(os.path.dirname(__file__), "consumers.log")
 if not logger.handlers:
-    file_handler = RotatingFileHandler(_logfile, maxBytes=2 * 1024 * 1024, backupCount=2)
+    file_handler = RotatingFileHandler(
+        _logfile, maxBytes=2 * 1024 * 1024, backupCount=2
+    )
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
@@ -235,7 +237,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
         self.close_code = close_code
         if hasattr(self, "user_group_name"):
             try:
-                await self.channel_layer.group_discard(self.user_group_name, self.channel_name)
+                await self.channel_layer.group_discard(
+                    self.user_group_name, self.channel_name
+                )
                 logger.info(f"Left group: {self.user_group_name}")
             except Exception as e:
                 logger.error(f"Error leaving group: {e}", exc_info=True)
@@ -254,7 +258,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
         """
         try:
             command = content.get("type")
-            logger.info(f"Received command: {command}, content keys: {list(content.keys())}")
+            logger.info(
+                f"Received command: {command}, content keys: {list(content.keys())}"
+            )
 
             if not command:
                 logger.warning("Missing 'type' field in message")
@@ -279,6 +285,8 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                 await self._handle_update(content)
             elif command == "delete":
                 await self._handle_delete(content)
+            elif command == "question":
+                await self._handle_question(content)
             else:
                 logger.warning(f"Unsupported command: {command}")
                 await self.send_json({"error": "Unsupported command", "type": command})
@@ -314,7 +322,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
         """Handle list command."""
         try:
             if not user or not self._is_authenticated_user(user):
-                await self.send_json({"type": EVENT_LIST, "error": "Authentication required"})
+                await self.send_json(
+                    {"type": EVENT_LIST, "error": "Authentication required"}
+                )
                 return
 
             data = await self.get_user_uploads(user)
@@ -395,6 +405,49 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
         await self.send_json(result)
         await self.model_broadcast("deleted", result)
 
+    async def _handle_question(self, content):
+        instance_id = content.get("instance_id", self.instance_id)
+        question = content.get("question", None)
+        result = self.question_upload(instance_id, question)
+        await self.send_json(result)
+
+    @sync_to_async
+    def question_upload(self, instance_id: Optional[str], question: Optional[str]):
+        """
+        Add a user question to the followup_qa of an Upload and trigger the background QnA task.
+        """
+        if not instance_id:
+            return {"type": EVENT_UPDATED, "error": "instance_id_required"}
+        if not question or not isinstance(question, str) or not question.strip():
+            return {"type": EVENT_UPDATED, "error": "question_required"}
+
+        try:
+            instance: Upload = Upload.objects.get(id=instance_id)
+        except Upload.DoesNotExist:
+            return {"type": EVENT_UPDATED, "error": "not_found"}
+
+        # Add question to followup_qa history (role: "user")
+        followup_qa = instance.followup_qa if instance.followup_qa is not None else []
+        followup_qa.append({"role": "user", "content": question})
+        instance.followup_qa = followup_qa
+        instance.save(update_fields=["followup_qa", "updated_at"])
+
+        # Trigger Celery qna task (async - will answer user's question)
+        try:
+            from core.tasks import process_question
+
+            process_question.delay(str(instance.id))
+        except Exception as e:
+            logger.error(f"Failed to trigger process_question({instance.id}) task: {e}")
+
+        # Minimal return: echo question, instance, and info
+        return {
+            "type": EVENT_UPDATED,
+            "instance_id": str(instance.id),
+            "question": question,
+            "status": "queued",
+        }
+
     @sync_to_async
     def get_user_uploads(self, user: Any) -> list:
         """
@@ -465,7 +518,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
             return {"type": EVENT_STATUS, "instance": None, "error": "not_found"}
 
     @sync_to_async
-    def create_instance(self, data: Dict[str, Any], user: Optional[Any] = None) -> Dict[str, Any]:
+    def create_instance(
+        self, data: Dict[str, Any], user: Optional[Any] = None
+    ) -> Dict[str, Any]:
         """
         Create a new Upload object or return existing if duplicate by hash for same user.
 
@@ -578,7 +633,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                         else:
                             image_base64_body = image_base64
                         try:
-                            image_data = base64.b64decode(image_base64_body, validate=True)
+                            image_data = base64.b64decode(
+                                image_base64_body, validate=True
+                            )
                         except Exception as decode_error:
                             return {
                                 "type": EVENT_CREATED,
@@ -643,7 +700,10 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                                 extension = ".jpg"
                             elif image_data.startswith(b"GIF"):
                                 extension = ".gif"
-                            elif image_data.startswith(b"RIFF") and b"WEBP" in image_data[:12]:
+                            elif (
+                                image_data.startswith(b"RIFF")
+                                and b"WEBP" in image_data[:12]
+                            ):
                                 extension = ".webp"
                     except Exception:
                         pass  # Use default .jpg if detection fails
@@ -684,7 +744,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                             pass
                     return {
                         "type": EVENT_CREATED,
-                        "error": {"image_base64": f"Failed to process base64 image: {str(e)}"},
+                        "error": {
+                            "image_base64": f"Failed to process base64 image: {str(e)}"
+                        },
                     }
 
             # Compute image_hash if image_path provided but hash missing
@@ -720,7 +782,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
 
             # Final double-check for duplicate (extremely rare, but covers any race condition!)
             image_hash_for_final = data.get("image_hash")
-            final_duplicate_instance = _find_duplicate_upload(image_hash_for_final, user)
+            final_duplicate_instance = _find_duplicate_upload(
+                image_hash_for_final, user
+            )
             if final_duplicate_instance:
                 # Clean up file if we just saved it
                 if destination_path and os.path.exists(destination_path):
@@ -745,10 +809,14 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
                 # Save with owner if user is provided
                 if user and hasattr(user, "id"):
                     instance = serializer.save(owner=user)
-                    logger.info(f"Upload created with owner: {user.id}, upload_id: {instance.id}")
+                    logger.info(
+                        f"Upload created with owner: {user.id}, upload_id: {instance.id}"
+                    )
                 else:
                     instance = serializer.save()
-                    logger.info(f"Upload created without owner, upload_id: {instance.id}")
+                    logger.info(
+                        f"Upload created without owner, upload_id: {instance.id}"
+                    )
 
                 # Re-serialize the saved instance to get complete data (including computed fields)
                 result_serializer = UploadSerializer(instance=instance)
@@ -790,7 +858,9 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
             return None
 
     @sync_to_async
-    def update_instance(self, instance_id: Optional[str], data: Dict[str, Any]) -> Dict[str, Any]:
+    def update_instance(
+        self, instance_id: Optional[str], data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Update an existing Upload instance.
 
@@ -856,7 +926,10 @@ class UploadStatusConsumer(AsyncJsonWebsocketConsumer):
         except Exception as e:
             # Catch any other unexpected errors
             error_msg = str(e)
-            if "ClientDisconnected" not in error_msg and "ConnectionClosed" not in error_msg:
+            if (
+                "ClientDisconnected" not in error_msg
+                and "ConnectionClosed" not in error_msg
+            ):
                 logger.error(f"Error in model_update: {e}", exc_info=True)
             else:
                 logger.debug(f"Connection closed in model_update: {e}")
