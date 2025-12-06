@@ -62,7 +62,8 @@ def process_upload_ocr(upload_id):
     # Only use a single group per user for all coms, if owner is set
     group_name = None
     if hasattr(upload, "owner") and upload.owner_id:
-        group_name = f"User_{upload.owner_id}"
+        # Use the new group name convention as in consumers.py (_get_user_group_name)
+        group_name = f"Upload_user_{upload.owner_id}"
     else:
         logger.warning(
             f"Upload {upload_id} has no owner - cannot send websocket message to user group"
@@ -195,6 +196,39 @@ def process_upload_ocr(upload_id):
                         "processed_text": markdown_text,
                     },
                 )
+                # --- NEW: Send final status message to ALL relevant groups per new pattern ---
+                # Send to all live websocket groups, consistent with consumers.py model_broadcast
+                try:
+                    from core.cache import get_cached_upload_payload
+                    from core.serializers import UploadSerializer
+                    # Full payload for broadcasting (same as consumers)
+                    payload = UploadSerializer(instance=upload).data
+                    # Import constants as in consumers
+                    MODEL_NAME = "Upload"
+                    EVENT_UPDATED = f"{MODEL_NAME}.updated"
+
+                    # Standard "all" group
+                    all_group = f"{MODEL_NAME}_all"
+                    # Per-user group (matching _get_user_group_name)
+                    user_group = group_name  # Should be "Upload_user_{user_id}"
+
+                    for grp in {all_group, user_group}:
+                        if grp:
+                            try:
+                                async_to_sync(channel_layer.group_send)(
+                                    grp,
+                                    {
+                                        "type": "model_update",
+                                        "event": EVENT_UPDATED,
+                                        "instance": payload,
+                                    },
+                                )
+                                logger.debug(f"Final OCR WS status sent to group {grp}: {payload}")
+                            except Exception as e:
+                                logger.warning(f"Failed broadcast to group {grp}: {e}")
+                except Exception as bcast_e:
+                    logger.warning(f"Could not broadcast OCR completion (model_update) to all groups: {bcast_e}")
+
             else:
                 logger.error(
                     f"OCR endpoint returned non-200 ({response.status_code}) for upload {upload_id}: {getattr(response, 'text', None)}"
