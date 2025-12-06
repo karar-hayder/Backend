@@ -358,13 +358,22 @@ class UploadRetrieveUpdateView(generics.RetrieveUpdateAPIView):
 from django.core.files.storage import default_storage
 
 
+from django.core.cache import cache
+
 class UploadImageView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated]
     lookup_field = "id"
 
+    IMAGE_CACHE_TIMEOUT = 60 * 10  # 10 minutes, in seconds
+
     def get_queryset(self):
-        # Use only() to avoid fetching unnecessary fields, increasing efficiency
-        return Upload.objects.filter(owner=self.request.user).only("id", "image_path")
+        # Cache the queryset (list of IDs and image_paths) per user for 10 mins
+        cache_key = f"upload_image_queryset:{self.request.user.id}"
+        qs = cache.get(cache_key)
+        if qs is None:
+            qs = list(Upload.objects.filter(owner=self.request.user).only("id", "image_path"))
+            cache.set(cache_key, qs, timeout=self.IMAGE_CACHE_TIMEOUT)
+        return qs
 
     def get(self, request, *args, **kwargs):
         try:
@@ -384,20 +393,27 @@ class UploadImageView(generics.GenericAPIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        try:
-            file_size = os.path.getsize(image_path)
-            content_type, _ = mimetypes.guess_type(image_path)
-            # Do not open the file and pass an open handle;
-            # Let FileResponse handle the opening/closing of the file.
-            response = FileResponse(
-                open(image_path, "rb"),
-                content_type=content_type or "application/octet-stream",
-            )
-            response["Content-Length"] = file_size
-            response["Content-Disposition"] = f'inline; filename="{os.path.basename(image_path)}"'
-            return response
-        except (OSError, IOError):
-            return Response(
-                {"detail": "Unable to open or read image file."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        # Cache key is based on image_path, which should be unique per upload
+        cache_key = f"upload_image_bytes:{image_path}"
+        image_bytes = cache.get(cache_key)
+        if image_bytes is None:
+            try:
+                with open(image_path, "rb") as image_file:
+                    image_bytes = image_file.read()
+                cache.set(cache_key, image_bytes, timeout=self.IMAGE_CACHE_TIMEOUT)
+            except (OSError, IOError):
+                return Response(
+                    {"detail": "Unable to open or read image file."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        file_size = len(image_bytes)
+        content_type, _ = mimetypes.guess_type(image_path)
+        from io import BytesIO
+        response = FileResponse(
+            BytesIO(image_bytes),
+            content_type=content_type or "application/octet-stream",
+        )
+        response["Content-Length"] = file_size
+        response["Content-Disposition"] = f'inline; filename="{os.path.basename(image_path)}"'
+        return response
