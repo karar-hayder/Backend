@@ -15,9 +15,11 @@ def process_upload_ocr(upload_id):
     Send upload image data to AI OCR endpoint (which streams markdown via HTTP response),
     update Upload object with results.
     Stream incremental OCR text back to websocket as it arrives.
+    Uses markdown text extraction from backend_main/core/utils.py for parsing AI output.
     """
     import requests
     from core.models import Upload
+    from core.utils import extract_markdown_text
 
     logger.info(f"Starting OCR processing for Upload ID: {upload_id}")
 
@@ -120,7 +122,7 @@ def process_upload_ocr(upload_id):
             )
 
             if response.status_code == 200:
-                markdown_text = ""
+                streamed_content = ""
                 # Stream chunks to websocket as they arrive
                 for chunk in response.iter_content(
                     chunk_size=None, decode_unicode=True
@@ -129,33 +131,38 @@ def process_upload_ocr(upload_id):
                         logger.debug(
                             f"OCR stream chunk for upload {upload_id}: size={len(chunk)}"
                         )
-                        markdown_text += chunk
-                        # Send partial result via websocket
+                        streamed_content += chunk
+                        # Use text extraction on streamed content so far (may be partial)
+                        extracted_markdown = extract_markdown_text(streamed_content)
+                        # Send partial result via websocket (both raw stream and extracted)
                         send_ws_message(
                             {
                                 "id": str(upload.id),
                                 "status": Upload.STATUS_PROCESSING,
-                                "streamed_text": markdown_text,
+                                "streamed_text": streamed_content,
+                                "extracted_markdown": extracted_markdown,
                                 "type": "Upload.status",
                             }
                         )
 
                 logger.info(
-                    f"OCR stream complete for upload {upload_id}. Final text length={len(markdown_text)}"
+                    f"OCR stream complete for upload {upload_id}. Final stream length={len(streamed_content)}"
                 )
-                upload.raw_text = markdown_text
+                # Get only the markdown text, safe even if not present
+                markdown_text = extract_markdown_text(streamed_content)
+                upload.raw_text = streamed_content
                 upload.processed_text = markdown_text
                 upload.status = Upload.STATUS_PROCESSED
                 upload.save(
                     update_fields=["raw_text", "processed_text", "status", "updated_at"]
                 )
-                logger.info(f"Upload {upload_id} marked as PROCESSED, text saved.")
+                logger.info(f"Upload {upload_id} marked as PROCESSED, text saved. Markdown length={len(markdown_text)}")
                 # Send final result (status: processed) via websocket
                 send_ws_message(
                     {
                         "id": str(upload.id),
                         "status": Upload.STATUS_PROCESSED,
-                        "raw_text": markdown_text,
+                        "raw_text": streamed_content,
                         "processed_text": markdown_text,
                         "type": "Upload.status",
                     }
